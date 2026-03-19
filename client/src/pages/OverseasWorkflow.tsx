@@ -27,7 +27,7 @@ import {
 import { SubjectPanel } from "./overseas/SubjectPanel";
 import { VideoModelSelector } from "./overseas/VideoModelSelector";
 import { LLMChatPanel } from "./overseas/LLMChatPanel";
-import { VIDEO_MODELS, IMAGE_MODELS, STYLE_IMAGE_MODELS, getVideoModelName, getImageModelName } from "@shared/videoModels";
+import { VIDEO_MODELS, IMAGE_MODELS, STYLE_IMAGE_MODELS, MARKET_OPTIONS, getVideoModelName, getImageModelName } from "@shared/videoModels";
 
 // ─── 颜色主题（幻角风格 深色+绿色主题） ──────────────────────────────────────
 const C = {
@@ -125,16 +125,7 @@ type WorkflowTab = "script" | "subject" | "storyboard";
 type SubjectFilter = "all" | "character" | "scene" | "prop" | "costume";
 type StoryboardPanel = "image" | "video";
 
-const MARKET_OPTIONS = [
-  { value: "us", label: "🇺🇸 美国" },
-  { value: "uk", label: "🇬🇧 英国" },
-  { value: "au", label: "🇦🇺 澳大利亚" },
-  { value: "ca", label: "🇨🇦 加拿大" },
-  { value: "in", label: "🇮🇳 印度" },
-  { value: "jp", label: "🇯🇵 日本" },
-  { value: "kr", label: "🇰🇷 韩国" },
-  { value: "global", label: "🌍 全球" },
-];
+// MARKET_OPTIONS is imported from @shared/videoModels
 
 const SHOT_TYPE_COLORS: Record<string, string> = {
   "大特写": "oklch(0.72 0.20 160)",
@@ -1496,6 +1487,7 @@ function StoryboardTab({ projectId, project, activeEpisode, onEpisodeChange }: {
 }) {
   const [activeShotId, setActiveShotId] = useState<number | null>(null);
   const [activePanel, setActivePanel] = useState<StoryboardPanel>("image");
+  const [showBatchRun, setShowBatchRun] = useState(false);
 
   const { data: shotsData, refetch } = trpc.overseas.listShots.useQuery({ projectId, episodeNumber: activeEpisode });
   const shots = (shotsData ?? []) as ScriptShot[];
@@ -1569,10 +1561,10 @@ function StoryboardTab({ projectId, project, activeEpisode, onEpisodeChange }: {
           >
             <Wand2 size={12} /> 自动生成提示词
           </Button>
-          <button style={{ display: "flex", alignItems: "center", gap: 4, color: C.muted, cursor: "pointer", background: "none", border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 12, padding: "4px 10px" }}
-            onClick={() => toast.info("批量生成功能开发中")}
+          <button style={{ display: "flex", alignItems: "center", gap: 4, color: C.green, cursor: "pointer", background: C.greenDim, border: `1px solid ${C.greenBorder}`, borderRadius: 6, fontSize: 12, padding: "4px 10px", fontWeight: 600 }}
+            onClick={() => setShowBatchRun(true)}
           >
-            <Zap size={12} /> 批量生图
+            <Zap size={12} /> 一键跑量
           </button>
         </div>
       </div>
@@ -1614,6 +1606,16 @@ function StoryboardTab({ projectId, project, activeEpisode, onEpisodeChange }: {
           project={project}
         />
       )}
+
+      {/* Batch Run Dialog */}
+      <BatchRunDialog
+        open={showBatchRun}
+        onClose={() => setShowBatchRun(false)}
+        projectId={projectId}
+        project={project}
+        activeEpisode={activeEpisode}
+        onComplete={() => { setShowBatchRun(false); refetch(); }}
+      />
     </div>
   );
 }
@@ -1698,7 +1700,7 @@ function StoryboardRightPanel({ shot, project, activePanel, onPanelChange, proje
   const [videoPrompt, setVideoPrompt] = useState(shot.videoPrompt ?? "");
   const [generatingImage, setGeneratingImage] = useState(false);
   const [generatingVideo, setGeneratingVideo] = useState(false);
-  const [selectedImageEngine, setSelectedImageEngine] = useState(shot.imageEngine || project.imageEngine || "gemini-3-pro-image");
+  const [selectedImageEngine, setSelectedImageEngine] = useState(shot.imageEngine || project.imageEngine || "doubao-seedream-4-5-251128");
   const [selectedVideoEngine, setSelectedVideoEngine] = useState(shot.videoEngine || project.videoEngine || "seedance_1_5");
   const [lastFrameUrl, setLastFrameUrl] = useState<string | null>(shot.lastFrameUrl);
   const [subjectRefUrls, setSubjectRefUrls] = useState<string[]>(() => {
@@ -1725,7 +1727,7 @@ function StoryboardRightPanel({ shot, project, activePanel, onPanelChange, proje
     prevShotId.current = shot.id;
     setImagePrompt(shot.firstFramePrompt ?? "");
     setVideoPrompt(shot.videoPrompt ?? "");
-    setSelectedImageEngine(shot.imageEngine || project.imageEngine || "gemini-3-pro-image");
+    setSelectedImageEngine(shot.imageEngine || project.imageEngine || "doubao-seedream-4-5-251128");
     setSelectedVideoEngine(shot.videoEngine || project.videoEngine || "seedance_1_5");
     setLastFrameUrl(shot.lastFrameUrl);
     try { setSubjectRefUrls(shot.subjectRefUrls ? JSON.parse(shot.subjectRefUrls) : []); } catch { setSubjectRefUrls([]); }
@@ -2249,5 +2251,224 @@ function ShotStrip({ shots, activeShotId, onSelect, project }: {
         <ChevronRight size={14} />
       </button>
     </div>
+  );
+}
+
+// ─── 一键跑量对话框 ───────────────────────────────────────────────────────────
+function BatchRunDialog({ open, onClose, projectId, project, activeEpisode, onComplete }: {
+  open: boolean;
+  onClose: () => void;
+  projectId: number;
+  project: OverseasProject;
+  activeEpisode: number;
+  onComplete: () => void;
+}) {
+  const [mode, setMode] = useState<"image" | "video" | "both">("both");
+  const [skipExisting, setSkipExisting] = useState(true);
+  const [selectedEpisodes, setSelectedEpisodes] = useState<number[]>([activeEpisode]);
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState<{ done: number; total: number; current: string } | null>(null);
+  const [batchVideoEngine, setBatchVideoEngine] = useState(project.videoEngine || "seedance_1_5");
+  const [batchDuration, setBatchDuration] = useState(5);
+  const [batchResolution, setBatchResolution] = useState<"480p" | "720p" | "1080p">("1080p");
+
+  const batchRun = trpc.overseas.batchRun.useMutation();
+
+  const toggleEpisode = (ep: number) => {
+    setSelectedEpisodes(prev =>
+      prev.includes(ep) ? prev.filter(e => e !== ep) : [...prev, ep]
+    );
+  };
+
+  async function handleRun() {
+    if (selectedEpisodes.length === 0) { toast.error("请选择至少一集"); return; }
+    setRunning(true);
+    setProgress({ done: 0, total: selectedEpisodes.length, current: "准备中..." });
+    try {
+      const result = await batchRun.mutateAsync({
+        projectId,
+        episodeNumbers: selectedEpisodes.sort((a, b) => a - b),
+        engine: batchVideoEngine as any,
+        aspectRatio: project.aspectRatio === "portrait" ? "9:16" : "16:9",
+        resolution: batchResolution,
+        smartDuration: false,
+        duration: batchDuration,
+        generateAudio: true,
+        skipExisting,
+        mode,
+      });
+      toast.success(`跑量完成！处理 ${result.processed} 个，失败 ${result.failed} 个`);
+      onComplete();
+    } catch (e: any) {
+      toast.error(e.message ?? "跑量失败");
+    } finally {
+      setRunning(false);
+      setProgress(null);
+    }
+  }
+
+  const totalEpisodes = project.totalEpisodes ?? 20;
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent style={{ background: C.surface, border: `1px solid ${C.border}`, maxWidth: 480 }}>
+        <DialogHeader>
+          <DialogTitle style={{ color: C.text, display: "flex", alignItems: "center", gap: 8 }}>
+            <Zap size={18} style={{ color: C.green }} /> 一键跑量
+          </DialogTitle>
+        </DialogHeader>
+
+        {running ? (
+          <div style={{ padding: "24px 0", textAlign: "center" }}>
+            <Loader2 size={32} className="animate-spin" style={{ color: C.green, margin: "0 auto 12px" }} />
+            <p style={{ color: C.text, fontSize: 14, fontWeight: 600 }}>正在批量生成中...</p>
+            {progress && (
+              <p style={{ color: C.muted, fontSize: 12, marginTop: 6 }}>{progress.current}</p>
+            )}
+            <p style={{ color: C.muted, fontSize: 11, marginTop: 4 }}>
+              此过程可能需要数分钟，请勿关闭页面
+            </p>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "8px 0" }}>
+            {/* Mode */}
+            <div>
+              <label style={{ fontSize: 12, color: C.muted, marginBottom: 6, display: "block" }}>生成内容</label>
+              <div style={{ display: "flex", gap: 6 }}>
+                {[
+                  { key: "both", label: "首帧 + 视频" },
+                  { key: "image", label: "仅首帧图" },
+                  { key: "video", label: "仅视频" },
+                ].map(m => (
+                  <button
+                    key={m.key}
+                    onClick={() => setMode(m.key as "image" | "video" | "both")}
+                    style={{
+                      flex: 1, padding: "8px 0", borderRadius: 8, cursor: "pointer",
+                      border: `2px solid ${mode === m.key ? C.green : C.border}`,
+                      background: mode === m.key ? C.greenDim : "transparent",
+                      color: mode === m.key ? C.green : C.muted,
+                      fontSize: 12, fontWeight: 600,
+                    }}
+                  >
+                    {m.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Episode Selection */}
+            <div>
+              <label style={{ fontSize: 12, color: C.muted, marginBottom: 6, display: "block" }}>选择集数</label>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                <button
+                  onClick={() => setSelectedEpisodes(Array.from({ length: totalEpisodes }, (_, i) => i + 1))}
+                  style={{ padding: "4px 8px", borderRadius: 5, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, fontSize: 11 }}
+                >
+                  全选
+                </button>
+                <button
+                  onClick={() => setSelectedEpisodes([])}
+                  style={{ padding: "4px 8px", borderRadius: 5, cursor: "pointer", border: `1px solid ${C.border}`, background: "transparent", color: C.muted, fontSize: 11 }}
+                >
+                  清空
+                </button>
+                {Array.from({ length: totalEpisodes }, (_, i) => i + 1).map(ep => (
+                  <button
+                    key={ep}
+                    onClick={() => toggleEpisode(ep)}
+                    style={{
+                      width: 32, height: 28, borderRadius: 5, cursor: "pointer",
+                      border: `1px solid ${selectedEpisodes.includes(ep) ? C.green : C.border}`,
+                      background: selectedEpisodes.includes(ep) ? C.greenDim : "transparent",
+                      color: selectedEpisodes.includes(ep) ? C.green : C.muted,
+                      fontSize: 11, fontWeight: 600,
+                    }}
+                  >
+                    {ep}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Skip Existing */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                onClick={() => setSkipExisting(!skipExisting)}
+                style={{
+                  width: 20, height: 20, borderRadius: 4, cursor: "pointer",
+                  border: `2px solid ${skipExisting ? C.green : C.border}`,
+                  background: skipExisting ? C.green : "transparent",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+              >
+                {skipExisting && <Check size={12} style={{ color: "oklch(0.08 0.005 240)" }} />}
+              </button>
+              <span style={{ fontSize: 12, color: C.muted }}>跳过已有内容（不重新生成）</span>
+            </div>
+
+            {/* Video Engine (only when mode includes video) */}
+            {(mode === "video" || mode === "both") && (
+              <div>
+                <label style={{ fontSize: 12, color: C.muted, marginBottom: 6, display: "block" }}>视频模型</label>
+                <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                  {[
+                    { key: "seedance_1_5", label: "Seedance 1.5 Pro" },
+                    { key: "kling_3_0", label: "Kling 3.0" },
+                    { key: "veo_3_1", label: "Veo 3.1" },
+                    { key: "wan2_6", label: "Wan 2.6" },
+                  ].map(e => (
+                    <button key={e.key} onClick={() => setBatchVideoEngine(e.key)}
+                      style={{ padding: "6px 10px", borderRadius: 6, cursor: "pointer", fontSize: 11, fontWeight: 600,
+                        border: `1px solid ${batchVideoEngine === e.key ? C.green : C.border}`,
+                        background: batchVideoEngine === e.key ? C.greenDim : "transparent",
+                        color: batchVideoEngine === e.key ? C.green : C.muted,
+                      }}>{e.label}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Duration (only when mode includes video) */}
+            {(mode === "video" || mode === "both") && (
+              <div>
+                <label style={{ fontSize: 12, color: C.muted, marginBottom: 6, display: "block" }}>视频时长</label>
+                <div style={{ display: "flex", gap: 4 }}>
+                  {[4, 5, 6, 8, 10].map(d => (
+                    <button key={d} onClick={() => setBatchDuration(d)}
+                      style={{ flex: 1, padding: "6px 0", borderRadius: 6, cursor: "pointer", fontSize: 11, fontWeight: 600,
+                        border: `1px solid ${batchDuration === d ? C.green : C.border}`,
+                        background: batchDuration === d ? C.greenDim : "transparent",
+                        color: batchDuration === d ? C.green : C.muted,
+                      }}>{d}s</button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Info */}
+            <div style={{ background: "oklch(0.75 0.17 65 / 0.1)", border: `1px solid oklch(0.75 0.17 65 / 0.3)`, borderRadius: 8, padding: "10px 12px" }}>
+              <p style={{ fontSize: 11, color: C.amber }}>
+                ⚡ 一键跑量将自动为所选集数的所有镜头生成首帧图片和视频，每集约需 5-15 分钟。
+                请确保已先完成「自动生成提示词」步骤。
+              </p>
+            </div>
+          </div>
+        )}
+
+        {!running && (
+          <DialogFooter>
+            <Button variant="outline" onClick={onClose} style={{ borderColor: C.border, color: C.muted }}>取消</Button>
+            <Button
+              onClick={handleRun}
+              disabled={selectedEpisodes.length === 0}
+              style={{ background: C.green, color: "oklch(0.08 0.005 240)", fontWeight: 700 }}
+            >
+              <Zap size={14} /> 开始跑量（{selectedEpisodes.length} 集）
+            </Button>
+          </DialogFooter>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -88,6 +88,7 @@ const batchRunSchema = z.object({
   duration: z.number().int().min(2).max(15).default(5),
   generateAudio: z.boolean().default(true),
   skipExisting: z.boolean().default(true),
+  mode: z.enum(["image", "video", "both"]).default("both"),
 });
 
 // ─── 统一视频生成辅助函数 (via VectorEngine) ──────────────────────────────
@@ -520,9 +521,9 @@ Important: Return ONLY the JSON array, no markdown, no explanation.`;
     return { shots: insertedShots, count: insertedShots.length };
   }),
 
-  // ── 生成首帧或尾帧图片（Gemini 3 Pro Image Reference to Video） ──────────────
+  // ── 生成首帧或尾帧图片（支持 Seedream 4.5/5.0 + VE Gemini 3 Pro Image） ──────────────
   generateFrame: protectedProcedure.input(generateFrameSchema).mutation(async ({ ctx, input }) => {
-    const { shotId, frameType, referenceImageUrls } = input;
+    const { shotId, frameType, referenceImageUrls, imageEngine, subjectRefUrls } = input;
 
     const [shot] = await (await getDb())!
       .select()
@@ -536,55 +537,92 @@ Important: Return ONLY the JSON array, no markdown, no explanation.`;
       .where(eq(overseasProjects.id, shot.projectId));
     if (!project) throw new Error("Project not found");
 
+    const aspectRatio = project.aspectRatio === "portrait" ? "9:16" : "16:9";
     const aspectLabel = project.aspectRatio === "portrait" ? "9:16 vertical portrait" : "16:9 horizontal landscape";
     const isLastFrame = frameType === "last";
+    // 选择图片引擎：优先 input > shot > project > 默认 Seedream 4.5
+    const chosenEngine = imageEngine || shot.imageEngine || project.imageEngine || "doubao-seedream-4-5-251128";
+    const isSeedream = chosenEngine.startsWith("doubao-seedream");
 
-    // 生成帧提示词
+    const styleMap: Record<string, string> = {
+      realistic: "photorealistic, cinematic, real human, 8K, film grain",
+      animation: "2D animation, cel-shaded, clean lines, vibrant colors",
+      cg: "3D CGI, Unreal Engine 5, hyper-detailed, ray tracing",
+    };
+    const styleKw = styleMap[project.style] ?? "photorealistic, cinematic";
+
+    // 生成帧提示词（针对不同模型优化）
     const framePromptResponse = await invokeLLM({
       messages: [
         {
           role: "system",
           content: `You are an expert AI image prompt writer for ${project.style} short drama production.
-Generate a detailed image generation prompt for a ${isLastFrame ? "final/ending" : "opening/starting"} frame.
-Style: ${project.style} photorealistic
+Generate a detailed, cinematic image prompt for the ${isLastFrame ? "final/ending" : "opening/starting"} frame.
+Style: ${styleKw}
 Aspect ratio: ${aspectLabel}
-No subtitles, no text overlays, no watermarks, no background music notation.`,
+Rules:
+- Describe exact visual composition: subject position, pose, facial expression, action
+- Include environment/background, lighting quality, color palette, atmosphere
+- Specify camera angle and framing (close-up, medium shot, wide, etc.)
+- For characters: describe clothing, hair, appearance details
+- NO subtitles, NO text overlays, NO watermarks, NO background music
+- Write in flowing descriptive English prose (NOT keyword lists)
+- Keep under 100 words`,
         },
         {
           role: "user",
-          content: `Shot visual description: ${shot.visualDescription}
-${shot.dialogue ? `Dialogue context: ${shot.dialogue}` : ""}
-Characters in shot: ${shot.characters || "none"}
-Emotion/mood: ${shot.emotion || "neutral"}
+          content: `Shot: ${shot.visualDescription}
+${shot.dialogue ? `Dialogue: "${shot.dialogue}"` : ""}
+Characters: ${shot.characters || "none"}
+Emotion: ${shot.emotion || "neutral"}
 Shot type: ${shot.shotType || "medium shot"}
+Scene: ${shot.sceneName || ""}
 
-Generate a concise but detailed image prompt for the ${isLastFrame ? "LAST frame (ending moment)" : "FIRST frame (opening moment)"} of this shot.
-Include: subject position, expression/action, environment details, lighting, camera angle.
-Return ONLY the prompt text, no explanation.`,
+Write the ${isLastFrame ? "LAST frame (final frozen moment before cut, emotional peak or resolution)" : "FIRST frame (opening composition as shot begins, establishing mood and positioning)"} prompt.
+Return ONLY the prompt text.`,
         },
       ],
     });
 
     const framePrompt = (framePromptResponse.choices[0].message.content as string).trim();
 
-    // 使用 VectorEngine Gemini 3 Pro Image (nano-banana-pro) 生成帧图片
-    const refImageUrl = referenceImageUrls && referenceImageUrls.length > 0
-      ? referenceImageUrls[0]
-      : undefined;
-    const aspectRatio = project.aspectRatio === "portrait" ? "9:16" : "16:9";
+    // 合并参考图（subjectRefUrls 优先）
+    const allRefUrls = [...(subjectRefUrls ?? []), ...(referenceImageUrls ?? [])];
+    const refImageUrl = allRefUrls.length > 0 ? allRefUrls[0] : undefined;
 
-    const s3Url = await generateVEImage({
-      prompt: framePrompt,
-      imageUrl: refImageUrl,
-      aspectRatio,
-      s3KeyPrefix: "frames",
-      userId: ctx.user.id,
-    });
+    let s3Url: string;
+
+    if (isSeedream) {
+      // 火山引擎 Seedream（即梦）生成帧
+      const seedreamResults = await generateSeedreamImage({
+        model: chosenEngine as any,
+        prompt: framePrompt,
+        image: refImageUrl,
+        size: "2K",
+        watermark: false,
+      });
+      const rawUrl = seedreamResults[0]?.url;
+      if (!rawUrl) throw new Error("Seedream returned no URL");
+      const resp = await fetch(rawUrl);
+      const buf = Buffer.from(await resp.arrayBuffer());
+      const key = `frames/${ctx.user.id}/${shot.id}-${frameType}-${nanoid(8)}.jpg`;
+      const { url } = await storagePut(key, buf, "image/jpeg");
+      s3Url = url;
+    } else {
+      // VectorEngine (nano-banana-pro / Gemini 3 Pro Image)
+      s3Url = await generateVEImage({
+        prompt: framePrompt,
+        imageUrl: refImageUrl,
+        aspectRatio,
+        s3KeyPrefix: "frames",
+        userId: ctx.user.id,
+      });
+    }
 
     if (frameType === "first") {
       await (await getDb())!
         .update(scriptShots)
-        .set({ firstFrameUrl: s3Url, firstFramePrompt: framePrompt, status: "frame_done" })
+        .set({ firstFrameUrl: s3Url, firstFramePrompt: framePrompt, status: "frame_done", imageEngine: chosenEngine })
         .where(eq(scriptShots.id, shotId));
     } else {
       await (await getDb())!
@@ -596,7 +634,7 @@ Return ONLY the prompt text, no explanation.`,
     return { url: s3Url, prompt: framePrompt };
   }),
 
-  // ── 生成视频提示词 ────────────────────────────────────────────────────────
+  // ── 生成视频  // ── 生成视频提示词（针对 Seedance 1.5 Pro 优化） ────────────────────────────────────────────
   generateVideoPrompt: protectedProcedure
     .input(z.object({ shotId: z.number().int() }))
     .mutation(async ({ ctx, input }) => {
@@ -611,28 +649,44 @@ Return ONLY the prompt text, no explanation.`,
         .from(overseasProjects)
         .where(eq(overseasProjects.id, shot.projectId));
 
+      const styleMap: Record<string, string> = {
+        realistic: "photorealistic, cinematic, real human actors",
+        animation: "2D animation style",
+        cg: "3D CGI, Unreal Engine quality",
+      };
+      const styleKw = styleMap[project?.style ?? "realistic"] ?? "photorealistic, cinematic";
+
       const response = await invokeLLM({
         messages: [
           {
             role: "system",
-            content: `You are an expert AI video prompt writer for ${project?.style || "realistic"} short drama production.
-Write concise, cinematic video generation prompts optimized for Kling 3.0 or Seedance 1.5.
-No background music. No subtitles in the video. No watermarks.`,
+            content: `You are an expert AI video prompt writer for Seedance 1.5 Pro (doubao-seedance-1-5-pro), a state-of-the-art text-to-video model.
+Seedance 1.5 Pro excels at:
+- Smooth, natural character movement and expressions
+- Cinematic camera work (dolly, pan, tilt, zoom)
+- Consistent character appearance across frames
+- Realistic physics and lighting
+
+Write prompts that:
+1. Start with the main subject and their action (what they're doing RIGHT NOW)
+2. Describe the camera movement explicitly
+3. Include lighting and atmosphere
+4. Keep it 2-3 sentences, under 80 words
+5. NO background music descriptions, NO subtitles, NO watermarks
+Style: ${styleKw}`,
           },
           {
             role: "user",
-            content: `Shot description: ${shot.visualDescription}
-${shot.dialogue ? `Dialogue: "${shot.dialogue}"` : "No dialogue"}
+            content: `Shot: ${shot.visualDescription}
+${shot.dialogue ? `Spoken dialogue: "${shot.dialogue}"` : ""}
 Characters: ${shot.characters || "none"}
-Emotion: ${shot.emotion || "neutral"}
+Emotion/mood: ${shot.emotion || "neutral"}
 Shot type: ${shot.shotType || "medium shot"}
+Scene: ${shot.sceneName || ""}
 
-Write a video generation prompt (2-4 sentences) that:
-1. Describes the visual action and movement
-2. ${shot.dialogue ? `Includes the dialogue naturally: "${shot.dialogue}"` : "Describes ambient sound if relevant"}
-3. Specifies camera movement (static/pan/zoom/dolly)
-4. Sets the mood and lighting
-Return ONLY the prompt, no explanation.`,
+Write a Seedance 1.5 Pro video prompt for this shot.
+${shot.dialogue ? `The character should be speaking the dialogue: "${shot.dialogue}"` : ""}
+Return ONLY the prompt text.`,
           },
         ],
       });
@@ -733,7 +787,9 @@ Return ONLY the prompt, no explanation.`,
 
   // ── 一键批量跑量（Agent 流水线：首帧→视频提示词→视频） ───────────────────
   batchRun: protectedProcedure.input(batchRunSchema).mutation(async ({ ctx, input }) => {
-    const { projectId, episodeNumbers, engine, aspectRatio, resolution, smartDuration, duration, generateAudio, skipExisting } = input;
+    const { projectId, episodeNumbers, engine, aspectRatio, resolution, smartDuration, duration, generateAudio, skipExisting, mode } = input;
+    const doImage = mode === "image" || mode === "both";
+    const doVideo = mode === "video" || mode === "both";
 
     const [project] = await (await getDb())!
       .select()
@@ -787,55 +843,90 @@ Return ONLY the prompt, no explanation.`,
     // 串行处理每个镜头（避免 API 限流）
     for (const shot of shotsToProcess) {
       try {
-        // STEP A: 生成首帧（如果没有）
-        if (!shot.firstFrameUrl) {
+        // STEP A: 生成首帧（如果没有，且 mode 包含 image）
+        if (doImage && !shot.firstFrameUrl) {
           await (await getDb())!
             .update(scriptShots)
             .set({ status: "generating_frame" })
             .where(eq(scriptShots.id, shot.id));
+
+          const batchStyleMap: Record<string, string> = {
+            realistic: "photorealistic, cinematic, real human, 8K, film grain",
+            animation: "2D animation, cel-shaded, clean lines, vibrant colors",
+            cg: "3D CGI, Unreal Engine 5, hyper-detailed, ray tracing",
+          };
+          const batchStyleKw = batchStyleMap[project.style] ?? "photorealistic, cinematic";
+          const batchAspectLabel = project.aspectRatio === "portrait" ? "9:16 vertical portrait" : "16:9 horizontal landscape";
 
           const framePromptResponse = await invokeLLM({
             messages: [
               {
                 role: "system",
                 content: `You are an expert AI image prompt writer for ${project.style} short drama production.
-Generate a detailed image generation prompt for an opening/starting frame.
-Style: ${project.style} photorealistic
-Aspect ratio: ${project.aspectRatio === "portrait" ? "9:16 vertical portrait" : "16:9 horizontal landscape"}
-No subtitles, no text overlays, no watermarks.`,
+Generate a detailed, cinematic image prompt for the FIRST frame (opening composition).
+Style: ${batchStyleKw}
+Aspect ratio: ${batchAspectLabel}
+Rules:
+- Describe exact visual composition: subject position, pose, facial expression, action
+- Include environment/background, lighting quality, color palette, atmosphere
+- Specify camera angle and framing
+- For characters: describe clothing, hair, appearance details
+- NO subtitles, NO text overlays, NO watermarks
+- Write in flowing descriptive English prose (NOT keyword lists)
+- Keep under 100 words`,
               },
               {
                 role: "user",
-                content: `Shot visual description: ${shot.visualDescription}
-${shot.dialogue ? `Dialogue context: ${shot.dialogue}` : ""}
-Characters in shot: ${shot.characters || "none"}
-Emotion/mood: ${shot.emotion || "neutral"}
+                content: `Shot: ${shot.visualDescription}
+${shot.dialogue ? `Dialogue: "${shot.dialogue}"` : ""}
+Characters: ${shot.characters || "none"}
+Emotion: ${shot.emotion || "neutral"}
 Shot type: ${shot.shotType || "medium shot"}
+Scene: ${shot.sceneName || ""}
 
-Generate a concise but detailed image prompt for the FIRST frame (opening moment) of this shot.
-Include: subject position, expression/action, environment details, lighting, camera angle.
-Return ONLY the prompt text, no explanation.`,
+Write the FIRST frame (opening composition as shot begins, establishing mood and positioning) prompt.
+Return ONLY the prompt text.`,
               },
             ],
           });
 
           const framePrompt = (framePromptResponse.choices[0].message.content as string).trim();
 
-          // VectorEngine Gemini 3 Pro Image (nano-banana-pro) 生成首帧
+          // 选择图片引擎：优先 project.imageEngine，默认 Seedream 4.5
+          const batchImageEngine = project.imageEngine || "doubao-seedream-4-5-251128";
+          const batchIsSeedream = batchImageEngine.startsWith("doubao-seedream");
           const batchRefUrl = globalRefUrls.length > 0 ? globalRefUrls[0] : undefined;
           const batchAspectRatio = project.aspectRatio === "portrait" ? "9:16" : "16:9";
 
-          const frameS3Url = await generateVEImage({
-            prompt: framePrompt,
-            imageUrl: batchRefUrl,
-            aspectRatio: batchAspectRatio,
-            s3KeyPrefix: "frames",
-            userId: ctx.user.id,
-          });
+          let frameS3Url: string;
+          if (batchIsSeedream) {
+            const seedreamResults = await generateSeedreamImage({
+              model: batchImageEngine as any,
+              prompt: framePrompt,
+              image: batchRefUrl,
+              size: "2K",
+              watermark: false,
+            });
+            const rawUrl = seedreamResults[0]?.url;
+            if (!rawUrl) throw new Error("Seedream returned no URL");
+            const resp = await fetch(rawUrl);
+            const buf = Buffer.from(await resp.arrayBuffer());
+            const key = `frames/${ctx.user.id}/${shot.id}-first-${nanoid(8)}.jpg`;
+            const { url } = await storagePut(key, buf, "image/jpeg");
+            frameS3Url = url;
+          } else {
+            frameS3Url = await generateVEImage({
+              prompt: framePrompt,
+              imageUrl: batchRefUrl,
+              aspectRatio: batchAspectRatio,
+              s3KeyPrefix: "frames",
+              userId: ctx.user.id,
+            });
+          }
 
           await (await getDb())!
             .update(scriptShots)
-            .set({ firstFrameUrl: frameS3Url, firstFramePrompt: framePrompt, status: "frame_done" })
+            .set({ firstFrameUrl: frameS3Url, firstFramePrompt: framePrompt, status: "frame_done", imageEngine: batchImageEngine })
             .where(eq(scriptShots.id, shot.id));
 
           // 更新本地变量
@@ -844,30 +935,41 @@ Return ONLY the prompt text, no explanation.`,
           shot.status = "frame_done";
         }
 
-        // STEP B: 生成视频提示词（如果没有）
-        if (!shot.videoPrompt) {
+        // STEP B: 生成视频提示词（针对 Seedance 1.5 Pro 优化，仅 doVideo 时）
+        if (doVideo && !shot.videoPrompt) {
+          const batchVidStyleMap: Record<string, string> = {
+            realistic: "photorealistic, cinematic, real human actors",
+            animation: "2D animation style",
+            cg: "3D CGI, Unreal Engine quality",
+          };
+          const batchVidStyleKw = batchVidStyleMap[project.style] ?? "photorealistic, cinematic";
+
           const vpResponse = await invokeLLM({
             messages: [
               {
                 role: "system",
-                content: `You are an expert AI video prompt writer for ${project.style} short drama production.
-Write concise, cinematic video generation prompts optimized for Kling 3.0.
-No background music. No subtitles. No watermarks.`,
+                content: `You are an expert AI video prompt writer for Seedance 1.5 Pro (doubao-seedance-1-5-pro).
+Seedance 1.5 Pro excels at smooth character movement, cinematic camera work, and realistic lighting.
+Write prompts that:
+1. Start with the main subject and their action (what they're doing RIGHT NOW)
+2. Describe the camera movement explicitly
+3. Include lighting and atmosphere
+4. Keep it 2-3 sentences, under 80 words
+5. NO background music, NO subtitles, NO watermarks
+Style: ${batchVidStyleKw}`,
               },
               {
                 role: "user",
-                content: `Shot description: ${shot.visualDescription}
-${shot.dialogue ? `Dialogue: "${shot.dialogue}"` : "No dialogue"}
+                content: `Shot: ${shot.visualDescription}
+${shot.dialogue ? `Spoken dialogue: "${shot.dialogue}"` : ""}
 Characters: ${shot.characters || "none"}
 Emotion: ${shot.emotion || "neutral"}
 Shot type: ${shot.shotType || "medium shot"}
+Scene: ${shot.sceneName || ""}
 
-Write a video generation prompt (2-4 sentences) that:
-1. Describes the visual action and movement
-2. ${shot.dialogue ? `Includes the dialogue naturally: "${shot.dialogue}"` : "Describes ambient sound if relevant"}
-3. Specifies camera movement (static/pan/zoom/dolly)
-4. Sets the mood and lighting
-Return ONLY the prompt, no explanation.`,
+Write a Seedance 1.5 Pro video prompt.
+${shot.dialogue ? `Character speaks: "${shot.dialogue}"` : ""}
+Return ONLY the prompt text.`,
               },
             ],
           });
@@ -880,7 +982,8 @@ Return ONLY the prompt, no explanation.`,
           shot.videoPrompt = videoPrompt;
         }
 
-        // STEP C: 生成视频
+        // STEP C: 生成视频（仅 doVideo 时）
+        if (!doVideo) { processed++; continue; }
         await (await getDb())!
           .update(scriptShots)
           .set({ status: "generating_video", videoEngine: engine })
@@ -898,7 +1001,7 @@ Return ONLY the prompt, no explanation.`,
 
         if (engine === "seedance_1_5") {
           videoUrl = await generateSeedance15Video({
-            prompt: shot.videoPrompt,
+            prompt: shot.videoPrompt ?? shot.visualDescription ?? "",
             imageUrl: shot.firstFrameUrl!,
             aspectRatio,
             resolution: resolution as "480p" | "720p" | "1080p" | undefined,
@@ -909,7 +1012,7 @@ Return ONLY the prompt, no explanation.`,
         } else {
           const model = ENGINE_TO_MODEL[engine] || "veo-3.1-4k";
           videoUrl = await generateUnifiedVideo({
-            prompt: shot.videoPrompt,
+            prompt: shot.videoPrompt ?? shot.visualDescription ?? "",
             imageUrl: shot.firstFrameUrl!,
             model,
             referenceImage: globalRefUrls.length > 0 ? globalRefUrls[0] : undefined,
@@ -1467,7 +1570,7 @@ Return ONLY the prompt, no explanation.`,
       const refUrl = input.referenceImageUrl || asset.mjImageUrl || asset.styleImageUrl;
       // Scenes default to 16:9 landscape regardless of project setting
       const assetAspectRatio = input.aspectRatio || (asset.type === "scene" ? "16:9" : (isPortrait ? "9:16" : "16:9"));
-      const chosenModel = input.imageModel || "nano-banana-pro";
+      const chosenModel = input.imageModel || "doubao-seedream-4-5-251128";
 
       let s3Url: string;
       if (chosenModel.startsWith("doubao-seedream")) {
@@ -1530,43 +1633,64 @@ Return ONLY the prompt, no explanation.`,
       );
       if (!project) throw new Error("Project not found");
       const styleMap: Record<string, string> = {
-        realistic: "photorealistic, cinematic, 8K",
-        animation: "2D animation, cel-shaded",
-        cg: "3D CGI, Unreal Engine 5",
+        realistic: "photorealistic, cinematic, 8K, film grain",
+        animation: "2D animation, cel-shaded, clean lines",
+        cg: "3D CGI, Unreal Engine 5, hyper-detailed",
       };
-      const styleKw = styleMap[project.style] ?? "photorealistic";
+      const styleKw = styleMap[project.style] ?? "photorealistic, cinematic";
       const results: Record<string, string> = {};
       const mvAspectRatio = project.aspectRatio === "portrait" ? "9:16" : "16:9";
+
+      // Helper: generate via Seedream 5.0 (best for multi-view consistency)
+      const genSeedream5 = async (prompt: string, refImageUrl: string | null, aspectRatio: string, field: string) => {
+        const seedreamResults = await generateSeedreamImage({
+          model: "doubao-seedream-5-0-260128" as any,
+          prompt,
+          image: refImageUrl || undefined,
+          size: "2K",
+          watermark: false,
+        });
+        const rawUrl = seedreamResults[0]?.url;
+        if (!rawUrl) throw new Error("Seedream 5.0 returned no URL");
+        const resp = await fetch(rawUrl);
+        const buf = Buffer.from(await resp.arrayBuffer());
+        const key = `overseas-assets/${ctx.user.id}/${asset.id}-${field}-${nanoid(6)}.jpg`;
+        const { url } = await storagePut(key, buf, "image/jpeg");
+        return url;
+      };
+
       if (asset.type === "character") {
+        const charDesc = asset.description ? `, ${asset.description}` : "";
         const views = [
-          { key: "closeup", field: "viewCloseUpUrl", label: "close-up portrait, face detail, upper body, cinematic lighting" },
-          { key: "front", field: "viewFrontUrl", label: "front view, full body standing T-pose, white clean background, character turnaround sheet" },
-          { key: "side", field: "viewSideUrl", label: "side profile view, full body standing, white clean background, character turnaround sheet" },
-          { key: "back", field: "viewBackUrl", label: "back view, full body standing, white clean background, character turnaround sheet" },
+          { field: "viewCloseUpUrl", label: `close-up portrait of ${asset.name}${charDesc}, face and upper body, cinematic lighting, ${styleKw}, white background, no text, no watermark` },
+          { field: "viewFrontUrl", label: `full body front view of ${asset.name}${charDesc}, T-pose standing, white clean background, character reference sheet, ${styleKw}, no text, no watermark` },
+          { field: "viewSideUrl", label: `full body side profile of ${asset.name}${charDesc}, standing, white clean background, character turnaround, ${styleKw}, no text, no watermark` },
+          { field: "viewBackUrl", label: `full body back view of ${asset.name}${charDesc}, standing, white clean background, character turnaround, ${styleKw}, no text, no watermark` },
         ];
         for (const v of views) {
           try {
-            const prompt = `${asset.name}, ${asset.description ?? ""}, ${v.label}, ${styleKw}, no text, no watermark`;
-            const s3Url = await generateVEImage({ prompt, imageUrl: refUrl, aspectRatio: mvAspectRatio, s3KeyPrefix: "overseas-assets", userId: ctx.user.id, assetId: asset.id });
+            const s3Url = await genSeedream5(v.label, refUrl, mvAspectRatio, v.field);
             results[v.field] = s3Url;
           } catch (e) { /* skip failed views */ }
         }
       } else if (asset.type === "scene") {
         try {
-          const prompt = `${asset.name}, ${asset.description ?? ""}, multi-angle view grid, 3x3 grid layout showing different camera angles and times of day, establishing shots, ${styleKw}, no text, no watermark`;
-          const s3Url = await generateVEImage({ prompt, imageUrl: refUrl, aspectRatio: mvAspectRatio, s3KeyPrefix: "overseas-assets", userId: ctx.user.id, assetId: asset.id });
+          const sceneDesc = asset.description ? `, ${asset.description}` : "";
+          const prompt = `${asset.name}${sceneDesc}, cinematic establishing shot, 16:9 horizontal landscape, ${styleKw}, no people, no characters, no humans, no text, no watermark, empty environment, atmospheric lighting`;
+          const s3Url = await genSeedream5(prompt, refUrl, "16:9", "multiAngleGridUrl");
           results.multiAngleGridUrl = s3Url;
         } catch (e) { /* skip */ }
       } else {
+        // Prop or costume
+        const propDesc = asset.description ? `, ${asset.description}` : "";
         const views = [
-          { key: "front", field: "viewFrontUrl", label: "front view, product shot, white background" },
-          { key: "side", field: "viewSideUrl", label: "side view, product shot, white background" },
-          { key: "back", field: "viewBackUrl", label: "back view, product shot, white background" },
+          { field: "viewFrontUrl", label: `${asset.name}${propDesc}, front view, product photography, white background, ${styleKw}, no text, no watermark` },
+          { field: "viewSideUrl", label: `${asset.name}${propDesc}, side view, product photography, white background, ${styleKw}, no text, no watermark` },
+          { field: "viewBackUrl", label: `${asset.name}${propDesc}, back view, product photography, white background, ${styleKw}, no text, no watermark` },
         ];
         for (const v of views) {
           try {
-            const prompt = `${asset.name}, ${asset.description ?? ""}, ${v.label}, ${styleKw}, no text, no watermark`;
-            const s3Url = await generateVEImage({ prompt, imageUrl: refUrl, aspectRatio: mvAspectRatio, s3KeyPrefix: "overseas-assets", userId: ctx.user.id, assetId: asset.id });
+            const s3Url = await genSeedream5(v.label, refUrl, mvAspectRatio, v.field);
             results[v.field] = s3Url;
           } catch (e) { /* skip */ }
         }
@@ -1860,29 +1984,37 @@ Rules:
       for (const shot of filtered) {
         try {
           // 生成生图提示词（如果没有）
+          let imgGenerated = false;
           if (!shot.firstFramePrompt) {
             const imgPromptRes = await invokeLLM({
               messages: [
                 {
                   role: "system",
                   content: `You are an expert AI image prompt writer for ${project.style} short drama production.
-Generate a detailed image generation prompt for the opening frame of a shot.
+Generate a detailed, cinematic image prompt for the FIRST frame (opening composition).
 Style: ${styleKw}
 Aspect ratio: ${aspectLabel}
-No subtitles, no text overlays, no watermarks.
+Rules:
+- Describe exact visual composition: subject position, pose, facial expression, action
+- Include environment/background, lighting quality, color palette, atmosphere
+- Specify camera angle and framing
+- For characters: describe clothing, hair, appearance details
+- NO subtitles, NO text overlays, NO watermarks
+- Write in flowing descriptive English prose (NOT keyword lists)
+- Keep under 100 words
 
 Known production assets:\n${assetDescriptions}`,
                 },
                 {
                   role: "user",
-                  content: `Shot description: ${shot.visualDescription}
-${shot.dialogue ? `Dialogue context: ${shot.dialogue}` : ""}
+                  content: `Shot: ${shot.visualDescription}
+${shot.dialogue ? `Dialogue: "${shot.dialogue}"` : ""}
 Characters: ${shot.characters || "none"}
 Emotion: ${shot.emotion || "neutral"}
 Shot type: ${shot.shotType || "medium shot"}
+Scene: ${shot.sceneName || ""}
 
-Generate a concise but detailed image prompt for the FIRST frame.
-Include: subject position, expression/action, environment, lighting, camera angle.
+Write the FIRST frame (opening composition as shot begins) prompt.
 Return ONLY the prompt text.`,
                 },
               ],
@@ -1891,32 +2023,44 @@ Return ONLY the prompt text.`,
             await db!.update(scriptShots)
               .set({ firstFramePrompt })
               .where(eq(scriptShots.id, shot.id));
+            imgGenerated = true;
           }
 
-          // 生成视频提示词（如果没有）
+          // 生成视频提示词（针对 Seedance 1.5 Pro 优化）
+          let vidGenerated = false;
           if (!shot.videoPrompt) {
+            const vidStyleMap: Record<string, string> = {
+              realistic: "photorealistic, cinematic, real human actors",
+              animation: "2D animation style",
+              cg: "3D CGI, Unreal Engine quality",
+            };
+            const vidStyleKw = vidStyleMap[project.style] ?? "photorealistic, cinematic";
             const vidPromptRes = await invokeLLM({
               messages: [
                 {
                   role: "system",
-                  content: `You are an expert AI video prompt writer for ${project.style} short drama production.
-Write concise, cinematic video generation prompts optimized for Kling 3.0 or Seedance 1.5.
-No background music. No subtitles. No watermarks.`,
+                  content: `You are an expert AI video prompt writer for Seedance 1.5 Pro (doubao-seedance-1-5-pro).
+Seedance 1.5 Pro excels at smooth character movement, cinematic camera work, and realistic lighting.
+Write prompts that:
+1. Start with the main subject and their action (what they're doing RIGHT NOW)
+2. Describe the camera movement explicitly
+3. Include lighting and atmosphere
+4. Keep it 2-3 sentences, under 80 words
+5. NO background music, NO subtitles, NO watermarks
+Style: ${vidStyleKw}`,
                 },
                 {
                   role: "user",
-                  content: `Shot description: ${shot.visualDescription}
-${shot.dialogue ? `Dialogue: "${shot.dialogue}"` : "No dialogue"}
+                  content: `Shot: ${shot.visualDescription}
+${shot.dialogue ? `Spoken dialogue: "${shot.dialogue}"` : ""}
 Characters: ${shot.characters || "none"}
 Emotion: ${shot.emotion || "neutral"}
 Shot type: ${shot.shotType || "medium shot"}
+Scene: ${shot.sceneName || ""}
 
-Write a video generation prompt (2-4 sentences):
-1. Visual action and movement
-2. ${shot.dialogue ? `Include dialogue: "${shot.dialogue}"` : "Ambient sound"}
-3. Camera movement
-4. Mood and lighting
-Return ONLY the prompt.`,
+Write a Seedance 1.5 Pro video prompt.
+${shot.dialogue ? `Character speaks: "${shot.dialogue}"` : ""}
+Return ONLY the prompt text.`,
                 },
               ],
             });
@@ -1924,15 +2068,17 @@ Return ONLY the prompt.`,
             await db!.update(scriptShots)
               .set({ videoPrompt })
               .where(eq(scriptShots.id, shot.id));
+            vidGenerated = true;
           }
 
-          generated++;
+          if (imgGenerated || vidGenerated) generated++;
         } catch (err) {
           errors.push({ shotId: shot.id, error: (err as Error).message });
         }
       }
 
-      return { generated, errors, total: filtered.length };
+      // 返回字段名与前端期望一致
+      return { imagePrompts: generated, videoPrompts: generated, generated, errors, total: filtered.length };
     }),
 
   // ── Excel 分镜表导入 ───────────────────────────────────────────────────────
@@ -2079,7 +2225,8 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
         ...input.history.map(h => ({ role: h.role as "user" | "assistant", content: h.content })),
         { role: "user", content: input.message },
       ];
-      const response = await callClaudeSonnet(messages, { max_tokens: 4096, temperature: 0.7 });
-      return { reply: response };
+      const response = await invokeLLM({ messages });
+      const reply = (response.choices[0].message.content as string).trim();
+      return { reply };
     }),
 });

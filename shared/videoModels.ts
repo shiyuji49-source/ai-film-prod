@@ -17,16 +17,9 @@ export interface VideoModelDef {
   caps: VideoModelCaps;
 }
 
+/** 视频生成只保留 Seedance 1.5 Pro（火山引擎） */
 export const VIDEO_MODELS: VideoModelDef[] = [
   { id: "seedance_1_5", name: "Seedance 1.5 Pro", provider: "豆包", caps: { firstFrame: true, lastFrame: true, subjectRef: false } },
-  { id: "veo_3_1", name: "Veo 3.1 4K", provider: "Google", caps: { firstFrame: true, lastFrame: false, subjectRef: false } },
-  { id: "kling_3_0", name: "Kling 3.0", provider: "快手", caps: { firstFrame: true, lastFrame: true, subjectRef: true } },
-  { id: "kling_3_0_omni", name: "Kling 3.0 Omni", provider: "快手", caps: { firstFrame: true, lastFrame: true, subjectRef: true } },
-  { id: "runway_gen4", name: "Runway Gen-4", provider: "Runway", caps: { firstFrame: true, lastFrame: false, subjectRef: true } },
-  { id: "hailuo_2_3", name: "海螺 2.3", provider: "MiniMax", caps: { firstFrame: true, lastFrame: false, subjectRef: true } },
-  { id: "grok_video_3", name: "Grok Video 3", provider: "xAI", caps: { firstFrame: true, lastFrame: false, subjectRef: false } },
-  { id: "wan2_6", name: "Wan 2.6 I2V", provider: "阿里", caps: { firstFrame: true, lastFrame: false, subjectRef: false } },
-  { id: "sora_2_pro", name: "Sora 2 Pro", provider: "OpenAI", caps: { firstFrame: true, lastFrame: false, subjectRef: true } },
 ];
 
 export function getVideoModelCaps(modelId: string): VideoModelCaps {
@@ -49,12 +42,25 @@ export interface ImageModelDef {
   api: "vectorengine" | "volcano";
 }
 
+/**
+ * 图片模型：
+ * - doubao-seedream-4-5：火山引擎 ARK（首帧生成，默认）
+ * - doubao-seedream-5-0：火山引擎 ARK（多视角/主体定稿）
+ * - MJ：通过 VectorEngine（风格定调）
+ * - nano-banana-pro：VectorEngine Gemini 3 Pro Image（高质量）
+ */
 export const IMAGE_MODELS: ImageModelDef[] = [
-  { id: "nano-banana-pro", name: "Gemini 3 Pro Image", provider: "Google", usage: "both", api: "vectorengine" },
-  { id: "doubao-seedream-5-0-260128", name: "即梦 5.0", provider: "豆包", usage: "both", api: "volcano" },
   { id: "doubao-seedream-4-5-251128", name: "即梦 4.5", provider: "豆包", usage: "style", api: "volcano" },
+  { id: "doubao-seedream-5-0-260128", name: "即梦 5.0", provider: "豆包", usage: "finalize", api: "volcano" },
   { id: "midjourney", name: "Midjourney", provider: "MJ", usage: "style", api: "vectorengine" },
+  { id: "nano-banana-pro", name: "Gemini 3 Pro Image", provider: "Google", usage: "both", api: "vectorengine" },
 ];
+
+/** 多视角专用模型：即梦 5.0（火山引擎） */
+export const MULTI_VIEW_MODEL = "doubao-seedream-5-0-260128";
+
+/** 首帧生成专用模型：即梦 4.5（火山引擎，默认） */
+export const FRAME_IMAGE_MODEL = "doubao-seedream-4-5-251128";
 
 /// ─── 分辨率/宽高比选项 ────────────────────────────────────────────
 export const ASPECT_RATIO_OPTIONS = [
@@ -91,12 +97,39 @@ export const SEEDANCE_DURATION_OPTIONS = {
   smartLabel: "智能时长",
 } as const;
 
-/** 风格定调推荐模型 */
-export const STYLE_IMAGE_MODELS = IMAGE_MODELS.filter(m => m.usage === "style" || m.usage === "both");
+/** 风格定调推荐模型：MJ 和 即梦 4.5 */
+export const STYLE_IMAGE_MODELS: ImageModelDef[] = [
+  { id: "midjourney", name: "Midjourney", provider: "MJ", usage: "style", api: "vectorengine" },
+  { id: "doubao-seedream-4-5-251128", name: "即梦 4.5", provider: "豆包", usage: "style", api: "volcano" },
+];
 
-/** 主体定稿推荐模型 */
-export const FINALIZE_IMAGE_MODELS = IMAGE_MODELS.filter(m => m.usage === "finalize" || m.usage === "both");
+/** 主体定稿推荐模型：即梦 5.0 */
+export const FINALIZE_IMAGE_MODELS: ImageModelDef[] = [
+  { id: "doubao-seedream-5-0-260128", name: "即梦 5.0", provider: "豆包", usage: "finalize", api: "volcano" },
+];
 
 export function getImageModelName(modelId: string): string {
   return IMAGE_MODELS.find(m => m.id === modelId)?.name ?? modelId;
 }
+
+// ─── 市场选项 ──────────────────────────────────────────────────────────────────
+export interface MarketOption {
+  value: string;
+  label: string;
+  /** 推荐的图片生成模型 */
+  defaultImageEngine?: string;
+}
+
+/** 目标市场选项（前后端共用） */
+export const MARKET_OPTIONS: MarketOption[] = [
+  { value: "cn", label: "🇨🇳 中国", defaultImageEngine: "doubao-seedream-4-5-251128" },
+  { value: "us", label: "🇺🇸 美国", defaultImageEngine: "nano-banana-pro" },
+  { value: "uk", label: "🇬🇧 英国", defaultImageEngine: "nano-banana-pro" },
+  { value: "es", label: "🇪🇸 西班牙", defaultImageEngine: "midjourney" },
+  { value: "in", label: "🇮🇳 印度", defaultImageEngine: "doubao-seedream-4-5-251128" },
+  { value: "br", label: "🇧🇷 巴西", defaultImageEngine: "midjourney" },
+  { value: "de", label: "🇩🇪 德国", defaultImageEngine: "nano-banana-pro" },
+  { value: "fr", label: "🇫🇷 法国", defaultImageEngine: "nano-banana-pro" },
+  { value: "jp", label: "🇯🇵 日本", defaultImageEngine: "doubao-seedream-4-5-251128" },
+  { value: "kr", label: "🇰🇷 韩国", defaultImageEngine: "doubao-seedream-4-5-251128" },
+];

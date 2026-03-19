@@ -1,0 +1,9 @@
+{
+  "query": "CREATE TABLE IF NOT EXISTS `asset_history` (\n  `id` int NOT NULL AUTO_INCREMENT PRIMARY KEY,\n  `asset_id` int NOT NULL,\n  `user_id` int NOT NULL,\n  `image_type` varchar(50) NOT NULL,\n  `image_url` text NOT NULL,\n  `prompt` text,\n  `created_at` bigint NOT NULL\n);",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 316A9Qs3vUJFyBh.root --database JJfCNSWCALGyYdA6sncEmM --execute CREATE TABLE IF NOT EXISTS `asset_history` (\n  `id` int NOT NULL AUTO_INCREMENT PRIMARY KEY,\n  `asset_id` int NOT NULL,\n  `user_id` int NOT NULL,\n  `image_type` varchar(50) NOT NULL,\n  `image_url` text NOT NULL,\n  `prompt` text,\n  `created_at` bigint NOT NULL\n);",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1755
+}

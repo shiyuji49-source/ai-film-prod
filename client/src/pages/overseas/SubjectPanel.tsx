@@ -1,14 +1,15 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useCallback } from "react";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import {
-  X, Upload, Download, Loader2, Sparkles, ZoomIn,
+  X, Upload, Loader2, Sparkles, ZoomIn,
   ImageIcon, Users, MapPin, Package, Maximize2,
-  Palette, Grid3X3,
+  Palette, Grid3X3, ChevronLeft, ChevronRight,
+  Zap, CheckCircle2, RefreshCw, Shirt,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { STYLE_IMAGE_MODELS, IMAGE_MODELS, ASPECT_RATIO_OPTIONS } from "@shared/videoModels";
+import { STYLE_IMAGE_MODELS, ASPECT_RATIO_OPTIONS, MARKET_OPTIONS } from "@shared/videoModels";
 
 const C = {
   bg: "oklch(0.10 0.005 240)",
@@ -61,6 +62,7 @@ type OverseasAsset = {
 type OverseasProject = {
   id: number;
   name: string;
+  market: string | null;
   aspectRatio: "landscape" | "portrait";
   style: "realistic" | "animation" | "cg";
   imageEngine: string | null;
@@ -146,15 +148,30 @@ function ClickableImage({ url, alt, height, aspectRatio: ar }: { url: string; al
 export function SubjectPanel({ asset, project, onClose, onRefresh }: SubjectPanelProps) {
   const [mode, setMode] = useState<PanelMode>("style");
   const [stylePrompt, setStylePrompt] = useState(asset.stylePrompt ?? asset.mjPrompt ?? "");
-  const [styleModel, setStyleModel] = useState(asset.styleModel ?? "midjourney");
+  // Default model: for China market use Seedream 4.5, otherwise use project default or MJ
+  const getDefaultModel = useCallback(() => {
+    const marketDef = MARKET_OPTIONS.find(m => m.value === project.market);
+    return asset.styleModel ?? marketDef?.defaultImageEngine ?? project.imageEngine ?? "midjourney";
+  }, [asset.styleModel, project.market, project.imageEngine]);
+  const [styleModel, setStyleModel] = useState(getDefaultModel);
   const [generating, setGenerating] = useState(false);
   const [generatingMultiView, setGeneratingMultiView] = useState(false);
+  const [runningFullFlow, setRunningFullFlow] = useState(false);
+  const [fullFlowStep, setFullFlowStep] = useState<"idle" | "style" | "multiview" | "done">("idle");
   const [uploadingRef, setUploadingRef] = useState(false);
   const [resolution, setResolution] = useState(asset.resolution ?? "");
-  // Scene defaults to 16:9 landscape; character/prop default to 9:16 portrait
   const defaultAspectRatio = asset.type === "scene" ? "16:9" : (asset.aspectRatio ?? (project.aspectRatio === "portrait" ? "9:16" : "16:9"));
   const [aspectRatio, setAspectRatio] = useState(asset.aspectRatio ?? defaultAspectRatio);
   const refImageInputRef = useRef<HTMLInputElement>(null);
+
+  // History: collect all generated style images (current + previous)
+  const styleHistory: string[] = [
+    asset.styleImageUrl,
+    asset.mjImageUrl,
+    asset.mainImageUrl,
+  ].filter(Boolean) as string[];
+
+  // (HistoryPaginator is defined at module level below)
 
   const generateAssetImage = trpc.overseas.generateAssetImage.useMutation({
     onSuccess: () => {
@@ -187,6 +204,52 @@ export function SubjectPanel({ asset, project, onClose, onRefresh }: SubjectPane
     onError: (e: { message: string }) => toast.error(e.message),
   });
 
+  // ─── 一键全流程 ───────────────────────────────────────────────────────────────
+  const handleFullFlow = useCallback(async () => {
+    if (!stylePrompt.trim()) {
+      toast.error("请先输入或生成风格提示词");
+      return;
+    }
+    setRunningFullFlow(true);
+    setFullFlowStep("style");
+
+    try {
+      // Step 1: Generate style image
+      await new Promise<void>((resolve, reject) => {
+        generateAssetImage.mutate({
+          assetId: asset.id,
+          projectId: asset.projectId ?? 0,
+          viewType: "style",
+          imageModel: styleModel,
+          customPrompt: stylePrompt,
+          resolution,
+          aspectRatio,
+        }, {
+          onSuccess: () => { onRefresh(); resolve(); },
+          onError: (e) => reject(e),
+        });
+      });
+
+      // Step 2: Generate multi-view
+      setFullFlowStep("multiview");
+      await new Promise<void>((resolve, reject) => {
+        generateMultiView.mutate({ assetId: asset.id, projectId: asset.projectId ?? 0 }, {
+          onSuccess: () => { onRefresh(); resolve(); },
+          onError: (e) => reject(e),
+        });
+      });
+
+      setFullFlowStep("done");
+      toast.success("一键全流程完成！风格参考图 + 多视角均已生成");
+      onRefresh();
+    } catch (e: any) {
+      toast.error(`全流程失败：${e.message}`);
+    } finally {
+      setRunningFullFlow(false);
+      setFullFlowStep("idle");
+    }
+  }, [stylePrompt, styleModel, resolution, aspectRatio, asset.id, asset.projectId, generateAssetImage, generateMultiView, onRefresh]);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, field: "mjImageUrl" | "referenceImageUrl") => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -211,12 +274,16 @@ export function SubjectPanel({ asset, project, onClose, onRefresh }: SubjectPane
 
   const typeIcon = asset.type === "character" ? <Users size={16} style={{ color: C.green }} />
     : asset.type === "scene" ? <MapPin size={16} style={{ color: C.blue }} />
+    : asset.type === "costume" ? <Shirt size={16} style={{ color: C.amber }} />
     : <Package size={16} style={{ color: C.amber }} />;
 
   const typeLabel = asset.type === "character" ? "角色" : asset.type === "scene" ? "场景" : asset.type === "prop" ? "道具" : "服装";
 
   const hasStyleImage = !!asset.styleImageUrl;
   const hasMultiView = !!(asset.viewFrontUrl || asset.viewSideUrl || asset.viewBackUrl || asset.viewCloseUpUrl || asset.multiAngleGridUrl);
+
+  // Full flow step indicator
+  const flowStepLabel = fullFlowStep === "style" ? "生成风格参考图..." : fullFlowStep === "multiview" ? "生成多视角..." : "";
 
   return (
     <div style={{
@@ -235,7 +302,48 @@ export function SubjectPanel({ asset, project, onClose, onRefresh }: SubjectPane
         </button>
       </div>
 
-      {/* Mode Tabs - only 2 tabs now */}
+      {/* One-click full flow button */}
+      <div style={{ padding: "8px 16px", borderBottom: `1px solid ${C.border}`, background: C.bg }}>
+        <Button
+          onClick={handleFullFlow}
+          disabled={runningFullFlow || !stylePrompt.trim()}
+          style={{
+            width: "100%",
+            background: runningFullFlow ? C.mutedDim : "oklch(0.72 0.20 160)",
+            color: "oklch(0.08 0.005 240)",
+            fontWeight: 700, fontSize: 12, gap: 6,
+            border: "none",
+          }}
+        >
+          {runningFullFlow ? (
+            <><Loader2 size={13} className="animate-spin" /> {flowStepLabel}</>
+          ) : (
+            <><Zap size={13} /> 一键全流程（风格定调 → 多视角）</>
+          )}
+        </Button>
+        {/* Step progress */}
+        {runningFullFlow && (
+          <div style={{ display: "flex", gap: 8, marginTop: 6, justifyContent: "center" }}>
+            {[
+              { key: "style", label: "风格定调" },
+              { key: "multiview", label: "多视角" },
+            ].map(step => (
+              <div key={step.key} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 10 }}>
+                {fullFlowStep === step.key ? (
+                  <Loader2 size={10} className="animate-spin" style={{ color: C.green }} />
+                ) : fullFlowStep === "done" || (fullFlowStep === "multiview" && step.key === "style") ? (
+                  <CheckCircle2 size={10} style={{ color: C.green }} />
+                ) : (
+                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: C.mutedDim }} />
+                )}
+                <span style={{ color: fullFlowStep === step.key ? C.green : C.muted }}>{step.label}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Mode Tabs */}
       <div style={{ display: "flex", borderBottom: `1px solid ${C.border}`, flexShrink: 0 }}>
         {[
           { key: "style" as PanelMode, label: "风格定调", icon: <Palette size={12} />, done: hasStyleImage },
@@ -265,6 +373,7 @@ export function SubjectPanel({ asset, project, onClose, onRefresh }: SubjectPane
         {mode === "style" && (
           <StylePanel
             asset={asset}
+            styleHistory={styleHistory}
             stylePrompt={stylePrompt}
             setStylePrompt={setStylePrompt}
             styleModel={styleModel}
@@ -315,12 +424,13 @@ export function SubjectPanel({ asset, project, onClose, onRefresh }: SubjectPane
 
 // ─── 风格定调面板 ─────────────────────────────────────────────────────────────
 function StylePanel({
-  asset, stylePrompt, setStylePrompt, styleModel, setStyleModel,
+  asset, styleHistory, stylePrompt, setStylePrompt, styleModel, setStyleModel,
   resolution, setResolution, aspectRatio, setAspectRatio,
   generating, uploadingRef, onGenerate, onAutoPrompt, autoPromptLoading,
   onUploadRef, refImageInputRef, referenceImageUrl,
 }: {
   asset: OverseasAsset;
+  styleHistory: string[];
   stylePrompt: string;
   setStylePrompt: (v: string) => void;
   styleModel: string;
@@ -346,14 +456,9 @@ function StylePanel({
         风格定调：使用 MJ / 即梦 4.5 等模型探索视觉风格，确定整体美术方向
       </div>
 
-      {/* Current Style Image - object-contain + clickable lightbox */}
-      {asset.styleImageUrl && (
-        <div>
-          <label style={{ fontSize: 10, color: C.muted, marginBottom: 4, display: "block", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-            当前风格参考
-          </label>
-          <ClickableImage url={asset.styleImageUrl} alt="style" aspectRatio="16/9" />
-        </div>
+      {/* Style Image History with pagination */}
+      {styleHistory.length > 0 && (
+        <HistoryPaginator urls={styleHistory} label={`风格参考${styleHistory.length > 1 ? `（共 ${styleHistory.length} 张）` : ""}`} />
       )}
 
       {/* Reference Image Upload */}
@@ -410,6 +515,10 @@ function StylePanel({
             <option key={m.id} value={m.id}>{m.name} ({m.provider})</option>
           ))}
         </select>
+        <p style={{ fontSize: 10, color: C.muted, marginTop: 3 }}>
+          {styleModel === "doubao-seedream-4-5-251128" ? "💡 即梦 4.5：适合中国市场，真人写实风格" :
+           styleModel === "midjourney" ? "💡 MJ：适合海外市场，艺术感强" : ""}
+        </p>
       </div>
 
       {/* Aspect Ratio */}
@@ -461,7 +570,13 @@ function StylePanel({
         disabled={generating || !stylePrompt.trim()}
         style={{ background: C.green, color: "oklch(0.08 0.005 240)", fontWeight: 700, gap: 6 }}
       >
-        {generating ? <><Loader2 className="animate-spin w-4 h-4" /> 生成中...</> : <><Palette size={14} /> 生成风格参考图</>}
+        {generating ? (
+          <><Loader2 className="animate-spin w-4 h-4" /> 生成中...</>
+        ) : asset.styleImageUrl ? (
+          <><RefreshCw size={14} /> 重新生成</>
+        ) : (
+          <><Palette size={14} /> 生成风格参考图</>
+        )}
       </Button>
     </>
   );
@@ -478,11 +593,15 @@ function MultiViewPanel({
   const hasRef = !!(asset.mainImageUrl || asset.mjImageUrl || asset.styleImageUrl);
 
   if (asset.type === "character") {
+    const viewHistory = [
+      asset.viewCloseUpUrl, asset.viewFrontUrl, asset.viewSideUrl, asset.viewBackUrl,
+    ].filter(Boolean) as string[];
+
     return (
       <>
         <div style={{ padding: "8px 10px", borderRadius: 8, background: C.greenDim, border: `1px solid ${C.greenBorder}`, fontSize: 11, color: C.textSub }}>
           <Grid3X3 size={12} style={{ color: C.green, display: "inline", marginRight: 4 }} />
-          角色多视角：近景主视图 + 全身站立三视图（正/侧/背）白色干净背景
+          角色多视角：近景主视图 + 全身站立三视图（正/侧/背），白色干净背景
         </div>
 
         {/* View Grid */}
@@ -498,7 +617,13 @@ function MultiViewPanel({
           disabled={generatingMultiView || !hasRef}
           style={{ background: C.green, color: "oklch(0.08 0.005 240)", fontWeight: 700, gap: 6 }}
         >
-          {generatingMultiView ? <><Loader2 className="animate-spin w-4 h-4" /> 生成中（约1分钟）...</> : <><Grid3X3 size={14} /> 一键生成多视角</>}
+          {generatingMultiView ? (
+            <><Loader2 className="animate-spin w-4 h-4" /> 生成中（约1分钟）...</>
+          ) : hasRef ? (
+            <><RefreshCw size={14} /> {viewHistory.length > 0 ? "重新生成多视角" : "一键生成多视角"}</>
+          ) : (
+            <><Grid3X3 size={14} /> 一键生成多视角</>
+          )}
         </Button>
         {!hasRef && (
           <p style={{ fontSize: 10, color: C.amber, textAlign: "center" }}>请先在「风格定调」中生成风格参考图</p>
@@ -524,7 +649,11 @@ function MultiViewPanel({
           disabled={generatingMultiView || !hasRef}
           style={{ background: C.green, color: "oklch(0.08 0.005 240)", fontWeight: 700, gap: 6 }}
         >
-          {generatingMultiView ? <><Loader2 className="animate-spin w-4 h-4" /> 生成中...</> : <><Grid3X3 size={14} /> 生成多角度九宫格</>}
+          {generatingMultiView ? (
+            <><Loader2 className="animate-spin w-4 h-4" /> 生成中...</>
+          ) : (
+            <><Grid3X3 size={14} /> {asset.multiAngleGridUrl ? "重新生成" : "生成多角度九宫格"}</>
+          )}
         </Button>
         {!hasRef && (
           <p style={{ fontSize: 10, color: C.amber, textAlign: "center" }}>请先在「风格定调」中生成场景参考图</p>
@@ -552,12 +681,52 @@ function MultiViewPanel({
         disabled={generatingMultiView || !hasRef}
         style={{ background: C.green, color: "oklch(0.08 0.005 240)", fontWeight: 700, gap: 6 }}
       >
-        {generatingMultiView ? <><Loader2 className="animate-spin w-4 h-4" /> 生成中...</> : <><Grid3X3 size={14} /> 一键生成三视图</>}
+        {generatingMultiView ? (
+          <><Loader2 className="animate-spin w-4 h-4" /> 生成中...</>
+        ) : (
+          <><Grid3X3 size={14} /> {asset.viewFrontUrl ? "重新生成三视图" : "一键生成三视图"}</>
+        )}
       </Button>
       {!hasRef && (
         <p style={{ fontSize: 10, color: C.amber, textAlign: "center" }}>请先在「风格定调」中生成参考图</p>
       )}
     </>
+  );
+}
+
+// ─── History Paginator (defined at module level for reuse) ─────────────────────
+function HistoryPaginator({
+  urls, label,
+}: { urls: string[]; label: string }) {
+  const [idx, setIdx] = useState(0);
+  if (!urls.length) return null;
+  const cur = urls[idx];
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+        <label style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</label>
+        {urls.length > 1 && (
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <button
+              onClick={() => setIdx(i => Math.max(0, i - 1))}
+              disabled={idx === 0}
+              style={{ background: "none", border: "none", cursor: idx === 0 ? "default" : "pointer", color: idx === 0 ? C.mutedDim : C.muted, padding: 2 }}
+            >
+              <ChevronLeft size={12} />
+            </button>
+            <span style={{ fontSize: 10, color: C.muted }}>{idx + 1}/{urls.length}</span>
+            <button
+              onClick={() => setIdx(i => Math.min(urls.length - 1, i + 1))}
+              disabled={idx === urls.length - 1}
+              style={{ background: "none", border: "none", cursor: idx === urls.length - 1 ? "default" : "pointer", color: idx === urls.length - 1 ? C.mutedDim : C.muted, padding: 2 }}
+            >
+              <ChevronRight size={12} />
+            </button>
+          </div>
+        )}
+      </div>
+      <ClickableImage url={cur} alt={label} aspectRatio="16/9" />
+    </div>
   );
 }
 
