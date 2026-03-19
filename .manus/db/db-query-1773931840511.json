@@ -1,0 +1,9 @@
+{
+  "query": "SELECT id, userId, name, market, aspectRatio, style, genre, totalEpisodes, status, imageEngine, videoEngine_proj, isDeleted, createdAt, updatedAt FROM overseas_projects WHERE userId = 60002 AND isDeleted = false ORDER BY updatedAt DESC",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 316A9Qs3vUJFyBh.root --database JJfCNSWCALGyYdA6sncEmM --execute SELECT id, userId, name, market, aspectRatio, style, genre, totalEpisodes, status, imageEngine, videoEngine_proj, isDeleted, createdAt, updatedAt FROM overseas_projects WHERE userId = 60002 AND isDeleted = false ORDER BY updatedAt DESC",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1528
+}

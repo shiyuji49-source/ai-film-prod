@@ -1,0 +1,9 @@
+{
+  "query": "ALTER TABLE overseas_projects\n  ADD COLUMN genre varchar(64) NOT NULL DEFAULT 'romance' AFTER style",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 316A9Qs3vUJFyBh.root --database JJfCNSWCALGyYdA6sncEmM --execute ALTER TABLE overseas_projects\n  ADD COLUMN genre varchar(64) NOT NULL DEFAULT 'romance' AFTER style",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 2454
+}

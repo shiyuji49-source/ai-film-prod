@@ -28,3 +28,7 @@
 - [ ] S3 文件存储
 - [ ] LLM 智能辅助
 - [ ] 通知系统
+
+## Bug 修复
+
+- [x] 修复 overseas_projects 表缺少 aspectRatio、genre、totalEpisodes、status 字段导致的查询错误
