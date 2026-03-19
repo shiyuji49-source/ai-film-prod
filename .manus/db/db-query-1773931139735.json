@@ -1,0 +1,9 @@
+{
+  "query": "CREATE TABLE IF NOT EXISTS `assets` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`userId` int NOT NULL,\n\t`projectId` int,\n\t`type` enum('image','video','document') NOT NULL DEFAULT 'image',\n\t`url` text NOT NULL,\n\t`filename` varchar(255),\n\t`mimeType` varchar(128),\n\t`size` int,\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\tCONSTRAINT `assets_id` PRIMARY KEY(`id`))",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 316A9Qs3vUJFyBh.root --database JJfCNSWCALGyYdA6sncEmM --execute CREATE TABLE IF NOT EXISTS `assets` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`userId` int NOT NULL,\n\t`projectId` int,\n\t`type` enum('image','video','document') NOT NULL DEFAULT 'image',\n\t`url` text NOT NULL,\n\t`filename` varchar(255),\n\t`mimeType` varchar(128),\n\t`size` int,\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\tCONSTRAINT `assets_id` PRIMARY KEY(`id`))",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1529
+}

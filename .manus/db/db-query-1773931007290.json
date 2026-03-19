@@ -1,0 +1,9 @@
+{
+  "query": "CREATE TABLE IF NOT EXISTS `users` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`openId` varchar(64),\n\t`name` varchar(64),\n\t`email` varchar(320),\n\t`loginMethod` varchar(64),\n\t`role` enum('user','admin') NOT NULL DEFAULT 'user',\n\t`credits` int NOT NULL DEFAULT 10000,\n\t`identifier` varchar(320),\n\t`identifierType` enum('email','phone'),\n\t`passwordHash` varchar(256),\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\t`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,\n\t`lastSignedIn` timestamp NOT NULL DEFAULT (now()),\n\tCONSTRAINT `users_id` PRIMARY KEY(`id`),\n\tCONSTRAINT `users_openId_unique` UNIQUE(`openId`),\n\tCONSTRAINT `users_identifier_unique` UNIQUE(`identifier`)\n)",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 316A9Qs3vUJFyBh.root --database JJfCNSWCALGyYdA6sncEmM --execute CREATE TABLE IF NOT EXISTS `users` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`openId` varchar(64),\n\t`name` varchar(64),\n\t`email` varchar(320),\n\t`loginMethod` varchar(64),\n\t`role` enum('user','admin') NOT NULL DEFAULT 'user',\n\t`credits` int NOT NULL DEFAULT 10000,\n\t`identifier` varchar(320),\n\t`identifierType` enum('email','phone'),\n\t`passwordHash` varchar(256),\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\t`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,\n\t`lastSignedIn` timestamp NOT NULL DEFAULT (now()),\n\tCONSTRAINT `users_id` PRIMARY KEY(`id`),\n\tCONSTRAINT `users_openId_unique` UNIQUE(`openId`),\n\tCONSTRAINT `users_identifier_unique` UNIQUE(`identifier`)\n)",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1647
+}

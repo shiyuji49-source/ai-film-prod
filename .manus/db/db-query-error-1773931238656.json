@@ -1,0 +1,8 @@
+{
+  "query": "ALTER TABLE users \n  MODIFY COLUMN openId varchar(64) NULL,\n  MODIFY COLUMN name varchar(64),\n  ADD COLUMN identifier varchar(320) AFTER name,\n  ADD COLUMN identifierType enum('email','phone') AFTER identifier,\n  ADD COLUMN passwordHash varchar(256) AFTER identifierType,\n  ADD COLUMN credits int NOT NULL DEFAULT 10000 AFTER passwordHash",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 316A9Qs3vUJFyBh.root --database JJfCNSWCALGyYdA6sncEmM --execute ALTER TABLE users \n  MODIFY COLUMN openId varchar(64) NULL,\n  MODIFY COLUMN name varchar(64),\n  ADD COLUMN identifier varchar(320) AFTER name,\n  ADD COLUMN identifierType enum('email','phone') AFTER identifier,\n  ADD COLUMN passwordHash varchar(256) AFTER identifierType,\n  ADD COLUMN credits int NOT NULL DEFAULT 10000 AFTER passwordHash",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1054 (42S22) at line 1: Unknown column 'identifier' in 'users'"
+  ]
+}

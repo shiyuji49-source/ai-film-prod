@@ -1,0 +1,9 @@
+{
+  "query": "CREATE TABLE IF NOT EXISTS `creditLogs` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`userId` int NOT NULL,\n\t`delta` int NOT NULL,\n\t`balance` int NOT NULL,\n\t`action` enum('register_bonus','admin_grant','stripe_purchase','analyze_script','generate_shot','generate_prompt') NOT NULL,\n\t`projectId` int,\n\t`note` varchar(256),\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\tCONSTRAINT `creditLogs_id` PRIMARY KEY(`id`)\n)",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 316A9Qs3vUJFyBh.root --database JJfCNSWCALGyYdA6sncEmM --execute CREATE TABLE IF NOT EXISTS `creditLogs` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`userId` int NOT NULL,\n\t`delta` int NOT NULL,\n\t`balance` int NOT NULL,\n\t`action` enum('register_bonus','admin_grant','stripe_purchase','analyze_script','generate_shot','generate_prompt') NOT NULL,\n\t`projectId` int,\n\t`note` varchar(256),\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\tCONSTRAINT `creditLogs_id` PRIMARY KEY(`id`)\n)",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1525
+}

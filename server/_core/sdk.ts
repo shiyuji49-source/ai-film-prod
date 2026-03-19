@@ -212,10 +212,11 @@ class SDKServer {
       });
       const { openId, appId, name } = payload as Record<string, unknown>;
 
+      // For custom auth sessions, appId and name are always present,
+      // but openId may be a numeric user ID string
       if (
         !isNonEmptyString(openId) ||
-        !isNonEmptyString(appId) ||
-        !isNonEmptyString(name)
+        !isNonEmptyString(appId)
       ) {
         console.warn("[Auth] Session payload missing required fields");
         return null;
@@ -224,7 +225,7 @@ class SDKServer {
       return {
         openId,
         appId,
-        name,
+        name: isNonEmptyString(name) ? name : "",
       };
     } catch (error) {
       console.warn("[Auth] Session verification failed", String(error));
@@ -268,9 +269,20 @@ class SDKServer {
 
     const sessionUserId = session.openId;
     const signedInAt = new Date();
+
+    // Try to find user by openId first (Manus OAuth users)
     let user = await db.getUserByOpenId(sessionUserId);
 
-    // If user not in DB, sync from OAuth server automatically
+    // If not found by openId, try to find by numeric user ID (custom auth users)
+    // Custom auth stores user.id as the openId field in the JWT
+    if (!user) {
+      const numericId = parseInt(sessionUserId, 10);
+      if (!isNaN(numericId) && numericId > 0) {
+        user = await db.getUserById(numericId);
+      }
+    }
+
+    // If still not found, try to sync from OAuth server (new Manus OAuth users)
     if (!user) {
       try {
         const userInfo = await this.getUserInfoWithJwt(sessionCookie ?? "");
@@ -292,10 +304,16 @@ class SDKServer {
       throw ForbiddenError("User not found");
     }
 
-    await db.upsertUser({
-      openId: user.openId,
-      lastSignedIn: signedInAt,
-    });
+    // Update last signed in for OAuth users
+    if (user.openId) {
+      await db.upsertUser({
+        openId: user.openId,
+        lastSignedIn: signedInAt,
+      });
+    } else {
+      // Update last signed in for custom auth users
+      await db.updateUserLastSignedIn(user.id);
+    }
 
     return user;
   }

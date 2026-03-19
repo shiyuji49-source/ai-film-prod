@@ -1,0 +1,13 @@
+{
+  "query": "CREATE TABLE IF NOT EXISTS `projects` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`userId` int NOT NULL,\n\t`clientId` varchar(32) NOT NULL,\n\t`name` varchar(128) NOT NULL DEFAULT '未命名项目',\n\t`data` text NOT NULL DEFAULT ('{}'),\n\t`lastActiveAt` timestamp NOT NULL DEFAULT (now()),\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\t`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,\n\t`isDeleted` boolean NOT NULL DEFAULT false,\n\tCONSTRAINT `projects_id` PRIMARY KEY(`id`))",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 316A9Qs3vUJFyBh.root --database JJfCNSWCALGyYdA6sncEmM --execute CREATE TABLE IF NOT EXISTS `projects` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`userId` int NOT NULL,\n\t`clientId` varchar(32) NOT NULL,\n\t`name` varchar(128) NOT NULL DEFAULT '未命名项目',\n\t`data` text NOT NULL DEFAULT ('{}'),\n\t`lastActiveAt` timestamp NOT NULL DEFAULT (now()),\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\t`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,\n\t`isDeleted` boolean NOT NULL DEFAULT false,\n\tCONSTRAINT `projects_id` PRIMARY KEY(`id`))",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1064 (42000) at line 1: You have an error in your SQL syntax; check the manual that corresponds to your TiDB version for the right syntax to use line 6 column 36 near \"'{}'),",
+    "\t`lastActiveAt` timestamp NOT NULL DEFAULT (now()),",
+    "\t`createdAt` timestamp NOT NULL DEFAULT (now()),",
+    "\t`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,",
+    "\t`isDeleted` boolean NOT NULL DEFAULT false,",
+    "\tCONSTRAINT `projects_id` PRIMARY KEY(`id`))\""
+  ]
+}

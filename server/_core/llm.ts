@@ -312,21 +312,39 @@ export async function invokeLLM(params: InvokeParams): Promise<InvokeResult> {
     payload.response_format = normalizedResponseFormat;
   }
 
-  const response = await fetch(resolveApiUrl(), {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${ENV.forgeApiKey}`,
-    },
-    body: JSON.stringify(payload),
-  });
+  const MAX_RETRIES = 3;
+  const url = resolveApiUrl();
+  const headers = {
+    "content-type": "application/json",
+    authorization: `Bearer ${ENV.forgeApiKey}`,
+  };
+  const body = JSON.stringify(payload);
 
-  if (!response.ok) {
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    const response = await fetch(url, { method: "POST", headers, body });
+
+    if (response.ok) {
+      return (await response.json()) as InvokeResult;
+    }
+
     const errorText = await response.text();
+    const isRateLimit = response.status === 429 || errorText.toLowerCase().includes("rate");
+
+    if (isRateLimit && attempt < MAX_RETRIES - 1) {
+      const delay = Math.min(2000 * Math.pow(2, attempt), 10000);
+      console.warn(`[LLM] Rate limited (attempt ${attempt + 1}/${MAX_RETRIES}), retrying in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      continue;
+    }
+
+    if (isRateLimit) {
+      throw new Error("AI 服务请求频率超限，请稍后再试");
+    }
+
     throw new Error(
       `LLM invoke failed: ${response.status} ${response.statusText} – ${errorText}`
     );
   }
 
-  return (await response.json()) as InvokeResult;
+  throw new Error("LLM invoke failed after max retries");
 }

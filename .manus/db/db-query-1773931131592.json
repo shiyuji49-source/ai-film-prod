@@ -1,0 +1,9 @@
+{
+  "query": "CREATE TABLE IF NOT EXISTS `orders` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`userId` int NOT NULL,\n\t`stripeSessionId` varchar(256),\n\t`credits` int NOT NULL,\n\t`amountFen` int NOT NULL,\n\t`status` enum('pending','paid','failed','refunded') NOT NULL DEFAULT 'pending',\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\tCONSTRAINT `orders_id` PRIMARY KEY(`id`),\n\tCONSTRAINT `orders_stripeSessionId_unique` UNIQUE(`stripeSessionId`))",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 316A9Qs3vUJFyBh.root --database JJfCNSWCALGyYdA6sncEmM --execute CREATE TABLE IF NOT EXISTS `orders` (\n\t`id` int AUTO_INCREMENT NOT NULL,\n\t`userId` int NOT NULL,\n\t`stripeSessionId` varchar(256),\n\t`credits` int NOT NULL,\n\t`amountFen` int NOT NULL,\n\t`status` enum('pending','paid','failed','refunded') NOT NULL DEFAULT 'pending',\n\t`createdAt` timestamp NOT NULL DEFAULT (now()),\n\tCONSTRAINT `orders_id` PRIMARY KEY(`id`),\n\tCONSTRAINT `orders_stripeSessionId_unique` UNIQUE(`stripeSessionId`))",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1514
+}

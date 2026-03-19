@@ -1,0 +1,9 @@
+{
+  "query": "ALTER TABLE users \n  MODIFY COLUMN openId varchar(64) NULL,\n  MODIFY COLUMN name varchar(64)",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 316A9Qs3vUJFyBh.root --database JJfCNSWCALGyYdA6sncEmM --execute ALTER TABLE users \n  MODIFY COLUMN openId varchar(64) NULL,\n  MODIFY COLUMN name varchar(64)",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 2242
+}

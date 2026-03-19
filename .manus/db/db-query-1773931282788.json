@@ -1,0 +1,40 @@
+{
+  "query": "SELECT id, openId, name, email, role, credits, identifier, identifierType FROM users ORDER BY id",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 316A9Qs3vUJFyBh.root --database JJfCNSWCALGyYdA6sncEmM --execute SELECT id, openId, name, email, role, credits, identifier, identifierType FROM users ORDER BY id",
+  "rows": [
+    {
+      "id": "1",
+      "openId": "PEoYwavgUPjW4J5DNoiV8L",
+      "name": "kexiahui",
+      "email": "afmanmoniz7r@hotmail.com",
+      "role": "user",
+      "credits": "10000",
+      "identifier": "NULL",
+      "identifierType": "NULL"
+    },
+    {
+      "id": "30001",
+      "openId": "NULL",
+      "name": "管理员",
+      "email": "NULL",
+      "role": "admin",
+      "credits": "999996",
+      "identifier": "13772503890",
+      "identifierType": "phone"
+    },
+    {
+      "id": "60001",
+      "openId": "Ao8A2huxf7QZFz4TAvTuun",
+      "name": "Shiyu Ji",
+      "email": "shiyuji49@gmail.com",
+      "role": "user",
+      "credits": "10000",
+      "identifier": "NULL",
+      "identifierType": "NULL"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\topenId\tname\temail\trole\tcredits\tidentifier\tidentifierType\n1\tPEoYwavgUPjW4J5DNoiV8L\tkexiahui\tafmanmoniz7r@hotmail.com\tuser\t10000\tNULL\tNULL\n30001\tNULL\t管理员\tNULL\tadmin\t999996\t13772503890\tphone\n60001\tAo8A2huxf7QZFz4TAvTuun\tShiyu Ji\tshiyuji49@gmail.com\tuser\t10000\tNULL\tNULL\n",
+  "stderr": "",
+  "execution_time_ms": 1510
+}

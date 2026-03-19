@@ -1,5 +1,27 @@
 {
   "version": "7",
   "dialect": "mysql",
-  "entries": []
+  "entries": [
+    {
+      "idx": 0,
+      "version": "5",
+      "when": 1773729086067,
+      "tag": "0000_good_prism",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "5",
+      "when": 1773729556320,
+      "tag": "0001_motionless_nemesis",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "5",
+      "when": 1773751303703,
+      "tag": "0002_windy_captain_midlands",
+      "breakpoints": true
+    }
+  ]
 }

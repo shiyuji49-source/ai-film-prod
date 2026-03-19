@@ -7,4 +7,13 @@ export const ENV = {
   isProduction: process.env.NODE_ENV === "production",
   forgeApiUrl: process.env.BUILT_IN_FORGE_API_URL ?? "",
   forgeApiKey: process.env.BUILT_IN_FORGE_API_KEY ?? "",
+  // Stripe
+  stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
+  stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
+  // VectorEngine (unified API proxy for all AI services)
+  vectorEngineApiKey: process.env.VECTORENGINE_API_KEY ?? "",
+  vectorEngineApiUrl: process.env.VECTORENGINE_API_URL ?? "https://api.vectorengine.ai",
+  // Legacy (kept for backward compatibility, now routed through VectorEngine)
+  geminiApiKey: process.env.GEMINI_API_KEY ?? "",
+  falApiKey: process.env.FAL_API_KEY ?? "",
 };
