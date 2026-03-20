@@ -1880,6 +1880,227 @@ Return ONLY the JSON array.`;
       return { results, totalEpisodes: scripts.length };
     }),
 
+  // ── 深度剧本解析（真人剧，克隆精品剧 analyzeScript，去除机甲/Q版） ──────────
+  analyzeScriptFull: protectedProcedure
+    .input(z.object({
+      projectId: z.number().int(),
+      scriptText: z.string().min(10).max(200000),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const { projectId, scriptText } = input;
+      const db = await getDb();
+      const [project] = await db!.select().from(overseasProjects)
+        .where(and(eq(overseasProjects.id, projectId), eq(overseasProjects.userId, ctx.user.id)));
+      if (!project) throw new Error("Project not found");
+
+      const prompt = `你是一位专业的影视制作人和剧本分析师。请仔细阅读以下真人短剧剧本，进行结构化分析。
+
+【分析规则】
+1. 集数识别：
+   - 忽略剧本开头的简介、序言、人物介绍、世界观说明等非正文内容
+   - 从第一个真正的故事集数开始（通常是EP-01或第一集正文）
+   - 每集提取：集数编号、标题、时长（分钟）、剧情简介（100字内）
+
+2. 人物识别（全局，不分集）：
+   - 只提取真实的角色名，包括所有有名字的人物
+   - 严格排除：场景说明、舞台指示、"出场人物"、"一卡"、"旁白"、"解说"、"画外音"、"字幕"等非角色词
+   - 同一角色去重，不要出现"张三（快乐）"和"张三（悲伤）"这样的重复，只保留"张三"
+   - 每个角色分析：姓名、角色定位（主角/配角/反派等）、外貌特征（肤色/发型/发色/脸型/眼睛/体型/年龄感等）、服装特征、性格特点
+
+3. 场景识别（全局）：
+   - 提取所有主要场景：场景名称、环境类型（室内/室外）、时间（白天/夜晚/黄昏/清晨）、氛围描述、视觉特征
+
+4. 道具识别（全局）：
+   - 提取重要道具：名称、外观描述、材质、用途
+   - 道具范围包括：实体道具（武器、容器、工具等）和界面类道具（屏幕显示器、控制台、手机界面等）
+
+【剧本内容】
+${scriptText.slice(0, 80000)}
+
+【输出格式】严格输出以下JSON结构，不要有任何额外说明：
+{
+  "episodes": [
+    {
+      "id": "ep01",
+      "number": 1,
+      "title": "集数标题",
+      "duration": 5,
+      "synopsis": "剧情简介"
+    }
+  ],
+  "characters": [
+    {
+      "name": "角色名",
+      "role": "主角/配角/反派/其他",
+      "appearance": "详细外貌：肤色、发型、发色、脸型、眼睛、体型、年龄感等",
+      "costume": "服装描述：颜色、款式、材质、特殊标志等",
+      "marks": "特殊标记：伤疤、纹身、特殊装备等（无则留空）",
+      "personality": "性格特点（简短）"
+    }
+  ],
+  "scenes": [
+    {
+      "name": "场景名称",
+      "environment": "室内/室外",
+      "timeOfDay": "白天/夜晚/黄昏/清晨",
+      "atmosphere": "氛围描述，如：紧张压抑、温暖宁静",
+      "visualFeatures": "视觉特征描述，如：霓虹灯光、废墟废墟、金属质感"
+    }
+  ],
+  "props": [
+    {
+      "name": "道具名称",
+      "appearance": "外观描述",
+      "material": "材质",
+      "purpose": "用途"
+    }
+  ]
+}`;
+
+      const response = await invokeLLM({
+        messages: [{ role: "user", content: prompt }],
+        response_format: {
+          type: "json_schema",
+          json_schema: {
+            name: "script_analysis",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: {
+                episodes: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      id: { type: "string" },
+                      number: { type: "integer" },
+                      title: { type: "string" },
+                      duration: { type: "integer" },
+                      synopsis: { type: "string" },
+                    },
+                    required: ["id", "number", "title", "duration", "synopsis"],
+                    additionalProperties: false,
+                  },
+                },
+                characters: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: { type: "string" },
+                      role: { type: "string" },
+                      appearance: { type: "string" },
+                      costume: { type: "string" },
+                      marks: { type: "string" },
+                      personality: { type: "string" },
+                    },
+                    required: ["name", "role", "appearance", "costume", "marks", "personality"],
+                    additionalProperties: false,
+                  },
+                },
+                scenes: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: { type: "string" },
+                      environment: { type: "string" },
+                      timeOfDay: { type: "string" },
+                      atmosphere: { type: "string" },
+                      visualFeatures: { type: "string" },
+                    },
+                    required: ["name", "environment", "timeOfDay", "atmosphere", "visualFeatures"],
+                    additionalProperties: false,
+                  },
+                },
+                props: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: { type: "string" },
+                      appearance: { type: "string" },
+                      material: { type: "string" },
+                      purpose: { type: "string" },
+                    },
+                    required: ["name", "appearance", "material", "purpose"],
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ["episodes", "characters", "scenes", "props"],
+              additionalProperties: false,
+            },
+          },
+        },
+      });
+
+      const content = response.choices[0].message.content as string;
+      const parsed = JSON.parse(content) as {
+        episodes: Array<{ id: string; number: number; title: string; duration: number; synopsis: string }>;
+        characters: Array<{ name: string; role: string; appearance: string; costume: string; marks: string; personality: string }>;
+        scenes: Array<{ name: string; environment: string; timeOfDay: string; atmosphere: string; visualFeatures: string }>;
+        props: Array<{ name: string; appearance: string; material: string; purpose: string }>;
+      };
+
+      // 获取已有资产名称，避免重复
+      const existingAssets = await db!.select().from(overseasAssets)
+        .where(and(eq(overseasAssets.projectId, projectId), eq(overseasAssets.userId, ctx.user.id)));
+      const existingNames = new Set(existingAssets.map(a => a.name.toLowerCase()));
+
+      const created: Array<{ id: number; name: string; type: string }> = [];
+      const skipped: string[] = [];
+
+      // 导入人物
+      for (const char of parsed.characters) {
+        if (existingNames.has(char.name.toLowerCase())) { skipped.push(char.name); continue; }
+        const description = `${char.appearance}。服装：${char.costume}${char.marks ? `。特征：${char.marks}` : ""}。性格：${char.personality}`;
+        const [result] = await db!.insert(overseasAssets).values({
+          projectId, userId: ctx.user.id,
+          type: "character", name: char.name,
+          description, tags: char.role,
+        });
+        created.push({ id: (result as any).insertId, name: char.name, type: "character" });
+        existingNames.add(char.name.toLowerCase());
+      }
+
+      // 导入场景
+      for (const scene of parsed.scenes) {
+        if (existingNames.has(scene.name.toLowerCase())) { skipped.push(scene.name); continue; }
+        const description = `${scene.environment}，${scene.timeOfDay}。氛围：${scene.atmosphere}。视觉特征：${scene.visualFeatures}`;
+        const [result] = await db!.insert(overseasAssets).values({
+          projectId, userId: ctx.user.id,
+          type: "scene", name: scene.name,
+          description, tags: `${scene.environment},${scene.timeOfDay}`,
+        });
+        created.push({ id: (result as any).insertId, name: scene.name, type: "scene" });
+        existingNames.add(scene.name.toLowerCase());
+      }
+
+      // 导入道具
+      for (const prop of parsed.props) {
+        if (existingNames.has(prop.name.toLowerCase())) { skipped.push(prop.name); continue; }
+        const description = `${prop.appearance}。材质：${prop.material}。用途：${prop.purpose}`;
+        const [result] = await db!.insert(overseasAssets).values({
+          projectId, userId: ctx.user.id,
+          type: "prop", name: prop.name,
+          description, tags: prop.material,
+        });
+        created.push({ id: (result as any).insertId, name: prop.name, type: "prop" });
+        existingNames.add(prop.name.toLowerCase());
+      }
+
+      return {
+        episodes: parsed.episodes,
+        created,
+        skipped,
+        addedCount: created.length,
+        characters: created.filter(a => a.type === "character").length,
+        scenes: created.filter(a => a.type === "scene").length,
+        props: created.filter(a => a.type === "prop").length,
+      };
+    }),
+
   // ── 资产自动识别（从剧本中提取人物/场景/道具） ─────────────────────────────
   autoDetectAssets: protectedProcedure
     .input(z.object({

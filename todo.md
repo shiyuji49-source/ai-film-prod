@@ -101,3 +101,12 @@
 - [x] 从 drizzle/schema.ts 中删除 apiSettings 表定义
 - [x] 清理所有引用 apiSettings 的代码（overseas.ts、db.ts、App.tsx、Dashboard.tsx、core.test.ts）
 - [x] 执行 DROP TABLE api_settings SQL
+
+## 2026-03-20 跑量剧克隆精品剧剧本拆解→主体资产→提示词 skill
+
+- [x] 读取精品剧后端：ai.ts 中的 analyzeScript、generateCharacterPrompt、generateAssetPrompt 等过程
+- [x] 读取精品剧前端：各阶段 UI 面板的实现
+- [x] 在跑量剧后端新增 analyzeScriptFull 过程（真人剧，全局人物/场景/道具识别，去除机甲/Q版）
+- [x] 在跑量剧前端主体 Tab 添加「剧本解析导入」按鈕和对话框
+- [x] 已存在资产自动去重，不重复导入
+- [x] 全郥 65 个测试通过，TypeScript 零错误

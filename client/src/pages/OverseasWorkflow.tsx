@@ -1110,6 +1110,22 @@ function SubjectTab({ projectId, project }: { projectId: number; project: Overse
   const [generatingPrompts, setGeneratingPrompts] = useState(false);
   const [promptProgress, setPromptProgress] = useState<{ current: number; total: number } | null>(null);
   const stopGeneratingPromptsRef = useRef(false);
+  // 剧本解析导入对话框
+  const [showScriptAnalyzeDialog, setShowScriptAnalyzeDialog] = useState(false);
+  const [analyzeScriptText, setAnalyzeScriptText] = useState("");
+  const analyzeScriptFull = trpc.overseas.analyzeScriptFull.useMutation({
+    onSuccess: (data) => {
+      if (data.addedCount > 0) {
+        toast.success(`剧本解析完成：新增 ${data.addedCount} 个资产（${data.characters} 角色、${data.scenes} 场景、${data.props} 道具）`);
+      } else {
+        toast.info("未发现新的资产，或所有资产已存在");
+      }
+      setShowScriptAnalyzeDialog(false);
+      setAnalyzeScriptText("");
+      refetchAll();
+    },
+    onError: (e) => toast.error(e.message ?? "剧本解析失败"),
+  });
   const { data: charAssets, refetch: refetchChar } = trpc.overseas.listAssets.useQuery({ projectId, type: "character" });
   const { data: sceneAssets, refetch: refetchScene } = trpc.overseas.listAssets.useQuery({ projectId, type: "scene" });
   const { data: propAssets, refetch: refetchProp } = trpc.overseas.listAssets.useQuery({ projectId, type: "prop" });
@@ -1158,6 +1174,14 @@ function SubjectTab({ projectId, project }: { projectId: number; project: Overse
             ))}
           </div>
           <div style={{ display: "flex", gap: 6 }}>
+            {/* 剧本解析导入按鈕（精品剧同款） */}
+            <Button
+              onClick={() => setShowScriptAnalyzeDialog(true)}
+              variant="outline"
+              style={{ borderColor: C.blue, color: C.blue, fontWeight: 600, fontSize: 12, gap: 5, height: 32 }}
+            >
+              <FileText size={13} /> 剧本解析导入
+            </Button>
             <Button
               onClick={() => {
                 setDetectingAssets(true);
@@ -1323,6 +1347,45 @@ function SubjectTab({ projectId, project }: { projectId: number; project: Overse
         onCreated={() => { setShowAddDialog(false); refetchAll(); }}
         projectId={projectId}
       />
+
+      {/* 剧本解析导入对话框 */}
+      <Dialog open={showScriptAnalyzeDialog} onOpenChange={setShowScriptAnalyzeDialog}>
+        <DialogContent style={{ background: C.surface, border: `1px solid ${C.border}`, maxWidth: 640 }}>
+          <DialogHeader>
+            <DialogTitle style={{ color: C.text }}>剧本解析导入</DialogTitle>
+          </DialogHeader>
+          <p style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>
+            粘贴完整剧本（支持多集），AI 将自动识别全局人物、场景、道具，含详细外貌和服装描述。已存在的资产不会重复导入。
+          </p>
+          <Textarea
+            value={analyzeScriptText}
+            onChange={e => setAnalyzeScriptText(e.target.value)}
+            placeholder="粘贴剧本内容（支持多集，最多 80000 字符）..."
+            style={{
+              minHeight: 280, background: C.bg, border: `1px solid ${C.border}`,
+              color: C.text, fontSize: 12, resize: "vertical",
+            }}
+          />
+          <DialogFooter style={{ gap: 8 }}>
+            <Button variant="outline" onClick={() => setShowScriptAnalyzeDialog(false)}
+              style={{ borderColor: C.border, color: C.muted }}>
+              取消
+            </Button>
+            <Button
+              onClick={() => {
+                if (!analyzeScriptText.trim()) { toast.error("请粘贴剧本内容"); return; }
+                analyzeScriptFull.mutate({ projectId, scriptText: analyzeScriptText });
+              }}
+              disabled={analyzeScriptFull.isPending}
+              style={{ background: C.blue, color: "white", fontWeight: 700, gap: 5 }}
+            >
+              {analyzeScriptFull.isPending
+                ? <><Loader2 size={13} className="animate-spin" /> AI 解析中...</>
+                : <><Sparkles size={13} /> 开始解析</>}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
