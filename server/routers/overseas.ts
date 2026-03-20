@@ -1874,6 +1874,10 @@ Return ONLY the JSON array.`;
         } catch (err) {
           results.push({ episodeNumber: ep.episodeNumber, shotCount: 0, error: (err as Error).message });
         }
+        // 集间加入间隔，避免连续请求触发限流（最后一集不需要等待）
+        if (ep !== scripts[scripts.length - 1]) {
+          await new Promise(resolve => setTimeout(resolve, 1500));
+        }
       }
 
       return { results, totalEpisodes: scripts.length };

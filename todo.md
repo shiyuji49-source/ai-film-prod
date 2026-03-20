@@ -140,3 +140,9 @@
 - [x] 删除 invokeLLM import，添加 callGPT import
 - [x] 修复 .choices[0].message.content 解构（callGPT 直接返回字符串）
 - [x] TypeScript 零错误，64/65 测试通过（1 个外部 API 值班性失败）
+## 2026-03-20 修复剧本文件上传解析 API 问题
+
+- [x] 排查 /api/upload-script 接口失败原因（429 限流）
+- [x] 修复：callGPT 重试次数 3→6，等待时间 2s→5s 起步，最长 60s
+- [x] batchParseScripts 集间加 1.5s 间隔，避免连续触发限流
+- [x] 测试 Excel/Word/TXT 三种格式上传均正常

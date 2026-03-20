@@ -41,7 +41,8 @@ export async function callGPT(options: ChatCompletionOptions): Promise<string> {
   const bodyObj: any = { model, messages, max_tokens, temperature };
   if (response_format) bodyObj.response_format = response_format;
 
-  const MAX_RETRIES = 3;
+  // 最多重试 6 次，指数退避：5s → 10s → 20s → 40s → 60s
+  const MAX_RETRIES = 6;
   const url = `${getBaseUrl()}/v1/chat/completions`;
   const headers = {
     "Content-Type": "application/json",
@@ -58,17 +59,18 @@ export async function callGPT(options: ChatCompletionOptions): Promise<string> {
     }
 
     const errText = await res.text();
-    const isRateLimit = res.status === 429 || errText.toLowerCase().includes("rate");
+    const isRateLimit = res.status === 429 || errText.toLowerCase().includes("rate") || errText.toLowerCase().includes("too many");
 
     if (isRateLimit && attempt < MAX_RETRIES - 1) {
-      const delay = Math.min(2000 * Math.pow(2, attempt), 10000);
+      // 指数退避：5s, 10s, 20s, 40s, 60s
+      const delay = Math.min(5000 * Math.pow(2, attempt), 60000);
       console.warn(`[GPT] Rate limited (attempt ${attempt + 1}/${MAX_RETRIES}), retrying in ${delay}ms...`);
       await new Promise(resolve => setTimeout(resolve, delay));
       continue;
     }
 
     if (isRateLimit) {
-      throw new Error("AI 服务请求频率超限，请稍后再试");
+      throw new Error("AI 服务请求频率超限，已自动重试多次，请等待约 1 分钟后再试");
     }
 
     throw new Error(`GPT API error (${res.status}): ${errText}`);
