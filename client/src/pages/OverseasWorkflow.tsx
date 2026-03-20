@@ -1225,8 +1225,10 @@ function SubjectTab({ projectId, project, hasNewAssets, onAssetsRefreshed }: { p
           </button>
         </div>
       )}
+      {/* Main Content: Asset Grid + Right Panel */}
+      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "row" }}>
       {/* Asset Grid */}
-      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column", minWidth: 0 }}>
         {/* Toolbar */}
         <div style={{
           padding: "10px 20px", borderBottom: `1px solid ${C.border}`,
@@ -1413,7 +1415,7 @@ function SubjectTab({ projectId, project, hasNewAssets, onAssetsRefreshed }: { p
         </div>
       </div>
 
-      {/* Right Panel: New SubjectPanel with style/finalize/multiview */}
+      {/* Right Panel: SubjectPanel slides in from right */}
       {selectedAsset && (
         <SubjectPanel
           asset={selectedAsset}
@@ -1422,6 +1424,7 @@ function SubjectTab({ projectId, project, hasNewAssets, onAssetsRefreshed }: { p
           onRefresh={refetchAll}
         />
       )}
+      </div>{/* end main content row */}
 
       <AddSubjectDialog
         open={showAddDialog}
