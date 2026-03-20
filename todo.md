@@ -128,3 +128,8 @@
 - [x] vectorengine.ts: callClaude → callGPT, callClaudeSonnet → callGPTFast, callClaudeOpus → callGPTPro
 - [x] 更新所有调用点（ai.ts 局部封装层、overseas.ts 导入），保留向后兼容别名
 - [x] 全郥 65 个测试通过，TypeScript 零错误
+
+## 2026-03-20 主体面板修复
+
+- [x] 删除主体面板「一键全流程」按钮及相关状态/逻辑
+- [x] 清理多余导入（Zap、CheckCircle2）和空行

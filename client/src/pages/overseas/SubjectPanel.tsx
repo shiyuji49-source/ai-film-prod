@@ -5,7 +5,7 @@ import {
   X, Upload, Loader2, Sparkles, ZoomIn,
   ImageIcon, Users, MapPin, Package, Maximize2,
   Palette, Grid3X3, ChevronLeft, ChevronRight,
-  Zap, CheckCircle2, RefreshCw, Shirt,
+  RefreshCw, Shirt,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -156,8 +156,7 @@ export function SubjectPanel({ asset, project, onClose, onRefresh }: SubjectPane
   const [styleModel, setStyleModel] = useState(getDefaultModel);
   const [generating, setGenerating] = useState(false);
   const [generatingMultiView, setGeneratingMultiView] = useState(false);
-  const [runningFullFlow, setRunningFullFlow] = useState(false);
-  const [fullFlowStep, setFullFlowStep] = useState<"idle" | "style" | "multiview" | "done">("idle");
+
   const [uploadingRef, setUploadingRef] = useState(false);
   const [resolution, setResolution] = useState(asset.resolution ?? "");
   const defaultAspectRatio = asset.type === "scene" ? "16:9" : (asset.aspectRatio ?? (project.aspectRatio === "portrait" ? "9:16" : "16:9"));
@@ -204,52 +203,6 @@ export function SubjectPanel({ asset, project, onClose, onRefresh }: SubjectPane
     onError: (e: { message: string }) => toast.error(e.message),
   });
 
-  // ─── 一键全流程 ───────────────────────────────────────────────────────────────
-  const handleFullFlow = useCallback(async () => {
-    if (!stylePrompt.trim()) {
-      toast.error("请先输入或生成风格提示词");
-      return;
-    }
-    setRunningFullFlow(true);
-    setFullFlowStep("style");
-
-    try {
-      // Step 1: Generate style image
-      await new Promise<void>((resolve, reject) => {
-        generateAssetImage.mutate({
-          assetId: asset.id,
-          projectId: asset.projectId ?? 0,
-          viewType: "style",
-          imageModel: styleModel,
-          customPrompt: stylePrompt,
-          resolution,
-          aspectRatio,
-        }, {
-          onSuccess: () => { onRefresh(); resolve(); },
-          onError: (e) => reject(e),
-        });
-      });
-
-      // Step 2: Generate multi-view
-      setFullFlowStep("multiview");
-      await new Promise<void>((resolve, reject) => {
-        generateMultiView.mutate({ assetId: asset.id, projectId: asset.projectId ?? 0 }, {
-          onSuccess: () => { onRefresh(); resolve(); },
-          onError: (e) => reject(e),
-        });
-      });
-
-      setFullFlowStep("done");
-      toast.success("一键全流程完成！风格参考图 + 多视角均已生成");
-      onRefresh();
-    } catch (e: any) {
-      toast.error(`全流程失败：${e.message}`);
-    } finally {
-      setRunningFullFlow(false);
-      setFullFlowStep("idle");
-    }
-  }, [stylePrompt, styleModel, resolution, aspectRatio, asset.id, asset.projectId, generateAssetImage, generateMultiView, onRefresh]);
-
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, field: "mjImageUrl" | "referenceImageUrl") => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -282,9 +235,6 @@ export function SubjectPanel({ asset, project, onClose, onRefresh }: SubjectPane
   const hasStyleImage = !!asset.styleImageUrl;
   const hasMultiView = !!(asset.viewFrontUrl || asset.viewSideUrl || asset.viewBackUrl || asset.viewCloseUpUrl || asset.multiAngleGridUrl);
 
-  // Full flow step indicator
-  const flowStepLabel = fullFlowStep === "style" ? "生成风格参考图..." : fullFlowStep === "multiview" ? "生成多视角..." : "";
-
   return (
     <div style={{
       width: 360, background: C.surface, borderLeft: `1px solid ${C.border}`,
@@ -300,47 +250,6 @@ export function SubjectPanel({ asset, project, onClose, onRefresh }: SubjectPane
         <button onClick={onClose} style={{ background: "none", border: "none", color: C.muted, cursor: "pointer" }}>
           <X size={16} />
         </button>
-      </div>
-
-      {/* One-click full flow button */}
-      <div style={{ padding: "8px 16px", borderBottom: `1px solid ${C.border}`, background: C.bg }}>
-        <Button
-          onClick={handleFullFlow}
-          disabled={runningFullFlow || !stylePrompt.trim()}
-          style={{
-            width: "100%",
-            background: runningFullFlow ? C.mutedDim : "oklch(0.72 0.20 160)",
-            color: "oklch(0.08 0.005 240)",
-            fontWeight: 700, fontSize: 12, gap: 6,
-            border: "none",
-          }}
-        >
-          {runningFullFlow ? (
-            <><Loader2 size={13} className="animate-spin" /> {flowStepLabel}</>
-          ) : (
-            <><Zap size={13} /> 一键全流程（风格定调 → 多视角）</>
-          )}
-        </Button>
-        {/* Step progress */}
-        {runningFullFlow && (
-          <div style={{ display: "flex", gap: 8, marginTop: 6, justifyContent: "center" }}>
-            {[
-              { key: "style", label: "风格定调" },
-              { key: "multiview", label: "多视角" },
-            ].map(step => (
-              <div key={step.key} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 10 }}>
-                {fullFlowStep === step.key ? (
-                  <Loader2 size={10} className="animate-spin" style={{ color: C.green }} />
-                ) : fullFlowStep === "done" || (fullFlowStep === "multiview" && step.key === "style") ? (
-                  <CheckCircle2 size={10} style={{ color: C.green }} />
-                ) : (
-                  <div style={{ width: 10, height: 10, borderRadius: "50%", background: C.mutedDim }} />
-                )}
-                <span style={{ color: fullFlowStep === step.key ? C.green : C.muted }}>{step.label}</span>
-              </div>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Mode Tabs */}
