@@ -2485,4 +2485,114 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
       const reply = response.trim();
       return { reply };
     }),
+
+  // 一键批量生成所有资产图片
+  batchGenerateAllImages: protectedProcedure
+    .input(z.object({
+      projectId: z.number().int(),
+      overwrite: z.boolean().default(false), // 是否覆盖已有图片
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      const [project] = await db!.select().from(overseasProjects)
+        .where(and(eq(overseasProjects.id, input.projectId), eq(overseasProjects.userId, ctx.user.id)));
+      if (!project) throw new Error("Project not found");
+
+      const assets = await db!.select().from(overseasAssets)
+        .where(and(eq(overseasAssets.projectId, input.projectId), eq(overseasAssets.userId, ctx.user.id)))
+        .orderBy(asc(overseasAssets.sortOrder));
+
+      const results: { assetId: number; name: string; type: string; success: boolean; error?: string }[] = [];
+
+      for (const asset of assets) {
+        try {
+          if (asset.type === "character") {
+            // 人物：生成风格定调图（style）
+            if (!input.overwrite && asset.mainImageUrl) {
+              results.push({ assetId: asset.id, name: asset.name, type: asset.type, success: true });
+              continue;
+            }
+            // 调用 generateAssetImage 逻辑（复用已有逻辑）
+            const styleMap: Record<string, string> = {
+              realistic: "photorealistic, cinematic, 8K, film grain",
+              anime: "anime style, vibrant colors, detailed illustration",
+              cartoon: "cartoon style, bold outlines, flat colors",
+              watercolor: "watercolor painting, soft edges, artistic",
+            };
+            const styleKw = styleMap[project.style ?? "realistic"] ?? "photorealistic, cinematic, 8K";
+            const mjPrompt = asset.mjPrompt ||
+              `${asset.name}, ${asset.description ?? ""}, full body portrait, solo, front view, pure white background, clean studio lighting, sharp face details, ${styleKw}, 9:16 --ar 9:16 --style raw --q 2`;
+            const mjUrl = await generateMJImageAndWait({ prompt: mjPrompt });
+            const resp = await fetch(mjUrl);
+            const buf = Buffer.from(await resp.arrayBuffer());
+            const key = `overseas-assets/${ctx.user.id}/${asset.id}-style-mj-${nanoid(6)}.jpg`;
+            const { url } = await storagePut(key, buf, "image/jpeg");
+            await db!.update(overseasAssets).set({ mainImageUrl: url }).where(eq(overseasAssets.id, asset.id));
+            results.push({ assetId: asset.id, name: asset.name, type: asset.type, success: true });
+          } else if (asset.type === "scene") {
+            // 场景：生成 4 张视角图
+            if (!input.overwrite && (asset.viewFrontUrl || asset.viewSideUrl)) {
+              results.push({ assetId: asset.id, name: asset.name, type: asset.type, success: true });
+              continue;
+            }
+            const styleMap: Record<string, string> = {
+              realistic: "photorealistic, cinematic, 8K, film grain",
+              anime: "anime style, vibrant colors, detailed illustration",
+              cartoon: "cartoon style, bold outlines, flat colors",
+              watercolor: "watercolor painting, soft edges, artistic",
+            };
+            const styleKw = styleMap[project.style ?? "realistic"] ?? "photorealistic, cinematic, 8K";
+            const sceneDesc = asset.description ?? "";
+            const llmScenePrompt = `你是专业的 AI 影片制作提示词工程师。请根据以下场景信息，生成 4 个用于 Seedream 5.0 的场景参考图英文提示词。
+场景名称：${asset.name}
+场景描述：${sceneDesc || "无"}
+整体风格：${styleKw}
+要求：生成 4 个不同拍摄角度的场景图提示词（全景建立镜头、内景中景、环境细节特写、氛围光影）。所有提示词必须：无人物、无文字、写实风格、16:9画幅、4K。
+请严格输出 JSON 格式：{"view1": "...", "view2": "...", "view3": "...", "view4": "..."}`;
+            let scenePrompts: { view1: string; view2: string; view3: string; view4: string } | null = null;
+            try {
+              const llmRaw = await callGPT({ messages: [{ role: "user", content: llmScenePrompt }] });
+              scenePrompts = JSON.parse(llmRaw) as { view1: string; view2: string; view3: string; view4: string };
+            } catch { /* 降级为固定模板 */ }
+            const baseScene = `${asset.name}${sceneDesc ? ", " + sceneDesc : ""}`;
+            const sceneViews: Array<{ field: string; prompt: string }> = [
+              { field: "viewFrontUrl", prompt: scenePrompts?.view1 ?? `${baseScene}, wide establishing shot, cinematic 16:9, ${styleKw}, no people, no humans, photorealistic, 4K, atmospheric lighting` },
+              { field: "viewSideUrl", prompt: scenePrompts?.view2 ?? `${baseScene}, interior medium shot, cinematic 16:9, ${styleKw}, no people, no humans, photorealistic, 4K, warm ambient lighting` },
+              { field: "viewBackUrl", prompt: scenePrompts?.view3 ?? `${baseScene}, close-up detail shot, cinematic 16:9, ${styleKw}, no people, no humans, photorealistic, 4K, dramatic lighting` },
+              { field: "viewCloseUpUrl", prompt: scenePrompts?.view4 ?? `${baseScene}, mood atmosphere shot, cinematic 16:9, ${styleKw}, no people, no humans, photorealistic, 4K, cinematic color grading` },
+            ];
+            const sceneResults: Record<string, string> = {};
+            await Promise.all(sceneViews.map(async (v) => {
+              try {
+                const sdResults = await generateSeedreamImage({
+                  model: "doubao-seedream-5-0-260128" as any,
+                  prompt: v.prompt,
+                  size: "2K",
+                  watermark: false,
+                });
+                const rawUrl = sdResults[0]?.url;
+                if (!rawUrl) return;
+                const resp = await fetch(rawUrl);
+                const buf = Buffer.from(await resp.arrayBuffer());
+                const key = `overseas-assets/${ctx.user.id}/${asset.id}-${v.field}-sd5-${nanoid(6)}.jpg`;
+                const { url } = await storagePut(key, buf, "image/jpeg");
+                sceneResults[v.field] = url;
+              } catch { /* skip */ }
+            }));
+            if (Object.keys(sceneResults).length > 0) {
+              await db!.update(overseasAssets).set(sceneResults).where(eq(overseasAssets.id, asset.id));
+            }
+            results.push({ assetId: asset.id, name: asset.name, type: asset.type, success: true });
+          }
+          // 两个资产之间加小间隔，避免触发限流
+          await new Promise(r => setTimeout(r, 1500));
+        } catch (e: unknown) {
+          results.push({ assetId: asset.id, name: asset.name, type: asset.type, success: false, error: String(e) });
+        }
+      }
+
+      const succeeded = results.filter(r => r.success).length;
+      const failed = results.filter(r => !r.success).length;
+      return { total: assets.length, succeeded, failed, results };
+    }),
 });

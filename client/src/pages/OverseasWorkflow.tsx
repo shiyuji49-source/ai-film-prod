@@ -1174,6 +1174,19 @@ function SubjectTab({ projectId, project, hasNewAssets, onAssetsRefreshed }: { p
   const [generatingPrompts, setGeneratingPrompts] = useState(false);
   const [promptProgress, setPromptProgress] = useState<{ current: number; total: number } | null>(null);
   const stopGeneratingPromptsRef = useRef(false);
+  const [batchGeneratingImages, setBatchGeneratingImages] = useState(false);
+  const batchGenerateImagesMutation = trpc.overseas.batchGenerateAllImages.useMutation({
+    onSuccess: (data) => {
+      refetchAll();
+      setBatchGeneratingImages(false);
+      if (data.failed > 0) {
+        toast.warning(`批量生成完成：${data.succeeded} 个成功，${data.failed} 个失败`);
+      } else {
+        toast.success(`批量生成完成：${data.succeeded} 个资产图片已生成`);
+      }
+    },
+    onError: (e) => { setBatchGeneratingImages(false); toast.error("批量生成失败：" + e.message); },
+  });
   // 剧本解析功能已合并到剧本 Tab 的「批量导入全集」对话框中
   const { data: charAssets, refetch: refetchChar } = trpc.overseas.listAssets.useQuery({ projectId, type: "character" });
   const { data: sceneAssets, refetch: refetchScene } = trpc.overseas.listAssets.useQuery({ projectId, type: "scene" });
@@ -1333,6 +1346,20 @@ function SubjectTab({ projectId, project, hasNewAssets, onAssetsRefreshed }: { p
               {generatingPrompts
                 ? <><X size={13} /> 停止 ({promptProgress?.current ?? 0}/{promptProgress?.total ?? 0})</>
                 : <><Wand2 size={13} /> 一键生成提示词</>}
+            </Button>
+            <Button
+              onClick={() => {
+                if (allAssets.length === 0) { toast.info("请先添加资产"); return; }
+                setBatchGeneratingImages(true);
+                batchGenerateImagesMutation.mutate({ projectId, overwrite: false });
+              }}
+              disabled={batchGeneratingImages || allAssets.length === 0}
+              variant="outline"
+              style={{ borderColor: batchGeneratingImages ? C.amber : C.greenBorder, color: batchGeneratingImages ? C.amber : C.green, fontWeight: 600, fontSize: 12, gap: 5, height: 32 }}
+            >
+              {batchGeneratingImages
+                ? <><Loader2 size={13} className="animate-spin" /> 批量生成中...</>
+                : <><ImageIcon size={13} /> 一键批量生成图片</>}
             </Button>
             <Button
               onClick={() => { setAddType("character"); setShowAddDialog(true); }}
