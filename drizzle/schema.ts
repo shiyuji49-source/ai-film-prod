@@ -274,3 +274,22 @@ export const overseasAssets = mysqlTable("overseas_assets", {
 
 export type OverseasAsset = typeof overseasAssets.$inferSelect;
 export type InsertOverseasAsset = typeof overseasAssets.$inferInsert;
+
+// ─── 批量任务表 ────────────────────────────────────────────────────────────────
+export const batchJobs = mysqlTable("batchJobs", {
+  id: int("id").autoincrement().primaryKey(),
+  userId: int("userId").notNull(),
+  projectId: int("projectId").notNull(),
+  type: varchar("type", { length: 64 }).notNull(), // "generateAllImages"
+  status: varchar("status", { length: 32 }).notNull().default("running"), // "running" | "done" | "error"
+  total: int("total").default(0).notNull(),
+  current: int("current").default(0).notNull(),
+  currentName: varchar("currentName", { length: 255 }).default("").notNull(),
+  succeeded: int("succeeded").default(0).notNull(),
+  failed: int("failed").default(0).notNull(),
+  errorMsg: text("errorMsg"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+export type BatchJob = typeof batchJobs.$inferSelect;
+export type InsertBatchJob = typeof batchJobs.$inferInsert;

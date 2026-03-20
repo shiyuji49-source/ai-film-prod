@@ -1,7 +1,7 @@
 // 跑量剧工作流 — 三段式界面（剧本 / 主体 / 故事版）
 // 参考幻角产品设计，工业暗色调，绿色主题
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { trpc } from "@/lib/trpc";
 import { useAuth } from "@/_core/hooks/useAuth";
@@ -1175,15 +1175,32 @@ function SubjectTab({ projectId, project, hasNewAssets, onAssetsRefreshed }: { p
   const [promptProgress, setPromptProgress] = useState<{ current: number; total: number } | null>(null);
   const stopGeneratingPromptsRef = useRef(false);
   const [batchGeneratingImages, setBatchGeneratingImages] = useState(false);
+  const [batchJobId, setBatchJobId] = useState<number | null>(null);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; currentName: string } | null>(null);
+  // 轮询批量任务进度
+  const { data: batchJobData } = trpc.overseas.getBatchJob.useQuery(
+    { jobId: batchJobId! },
+    { enabled: batchJobId !== null && batchGeneratingImages, refetchInterval: batchGeneratingImages ? 3000 : false }
+  );
+  useEffect(() => {
+    if (!batchJobData) return;
+    setBatchProgress({ current: batchJobData.current, total: batchJobData.total, currentName: batchJobData.currentName });
+    if (batchJobData.status === "done") {
+      setBatchGeneratingImages(false);
+      setBatchJobId(null);
+      refetchAll();
+      if (batchJobData.failed > 0) {
+        toast.warning(`批量生成完成：${batchJobData.succeeded} 个成功，${batchJobData.failed} 个失败`);
+      } else {
+        toast.success(`批量生成完成：${batchJobData.succeeded} 个资产图片已生成`);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [batchJobData]);
   const batchGenerateImagesMutation = trpc.overseas.batchGenerateAllImages.useMutation({
     onSuccess: (data) => {
-      refetchAll();
-      setBatchGeneratingImages(false);
-      if (data.failed > 0) {
-        toast.warning(`批量生成完成：${data.succeeded} 个成功，${data.failed} 个失败`);
-      } else {
-        toast.success(`批量生成完成：${data.succeeded} 个资产图片已生成`);
-      }
+      setBatchJobId(data.jobId);
+      setBatchProgress({ current: 0, total: data.total, currentName: "" });
     },
     onError: (e) => { setBatchGeneratingImages(false); toast.error("批量生成失败：" + e.message); },
   });
@@ -1360,7 +1377,7 @@ function SubjectTab({ projectId, project, hasNewAssets, onAssetsRefreshed }: { p
               style={{ borderColor: batchGeneratingImages ? C.amber : C.greenBorder, color: batchGeneratingImages ? C.amber : C.green, fontWeight: 600, fontSize: 12, gap: 5, height: 32 }}
             >
               {batchGeneratingImages
-                ? <><Loader2 size={13} className="animate-spin" /> 批量生成中...</>
+                ? <><Loader2 size={13} className="animate-spin" /> {batchProgress && batchProgress.total > 0 ? `生成中 ${batchProgress.current}/${batchProgress.total}` : "批量生成中..."}</>
                 : <><ImageIcon size={13} /> 一键批量生成图片</>}
             </Button>
             <Button

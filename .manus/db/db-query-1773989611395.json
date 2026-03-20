@@ -1,0 +1,9 @@
+{
+  "query": "CREATE TABLE IF NOT EXISTS `batchJobs` (\n  `id` int AUTO_INCREMENT NOT NULL,\n  `userId` int NOT NULL,\n  `projectId` int NOT NULL,\n  `type` varchar(64) NOT NULL,\n  `status` varchar(32) NOT NULL DEFAULT 'running',\n  `total` int NOT NULL DEFAULT 0,\n  `current` int NOT NULL DEFAULT 0,\n  `currentName` varchar(255) NOT NULL DEFAULT '',\n  `succeeded` int NOT NULL DEFAULT 0,\n  `failed` int NOT NULL DEFAULT 0,\n  `errorMsg` text,\n  `createdAt` timestamp NOT NULL DEFAULT (now()),\n  `updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,\n  CONSTRAINT `batchJobs_id` PRIMARY KEY(`id`)\n);",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway04.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 316A9Qs3vUJFyBh.root --database JJfCNSWCALGyYdA6sncEmM --execute CREATE TABLE IF NOT EXISTS `batchJobs` (\n  `id` int AUTO_INCREMENT NOT NULL,\n  `userId` int NOT NULL,\n  `projectId` int NOT NULL,\n  `type` varchar(64) NOT NULL,\n  `status` varchar(32) NOT NULL DEFAULT 'running',\n  `total` int NOT NULL DEFAULT 0,\n  `current` int NOT NULL DEFAULT 0,\n  `currentName` varchar(255) NOT NULL DEFAULT '',\n  `succeeded` int NOT NULL DEFAULT 0,\n  `failed` int NOT NULL DEFAULT 0,\n  `errorMsg` text,\n  `createdAt` timestamp NOT NULL DEFAULT (now()),\n  `updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,\n  CONSTRAINT `batchJobs_id` PRIMARY KEY(`id`)\n);",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 1861
+}
