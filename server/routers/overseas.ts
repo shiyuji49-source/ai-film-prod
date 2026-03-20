@@ -3,7 +3,6 @@ import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
 import { overseasProjects, scriptShots, videoJobs, overseasAssets } from "../../drizzle/schema";
 import { eq, and, desc, asc, isNull, isNotNull } from "drizzle-orm";
-import { invokeLLM } from "../_core/llm";
 import { storagePut } from "../storage";
 import { nanoid } from "nanoid";
 import * as XLSX from "xlsx";
@@ -13,6 +12,7 @@ import {
   generateNanoBananaImage,
   generateSeedreamImage,
   generateMJImageAndWait,
+  callGPT,
 } from "../lib/vectorengine";
 import { ENV } from "../_core/env";
 import pLimit from "p-limit";
@@ -445,7 +445,7 @@ Return a JSON array of shots with this exact schema:
 
 Important: Return ONLY the JSON array, no markdown, no explanation.`;
 
-    const response = await invokeLLM({
+    const response = await callGPT({
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
@@ -476,7 +476,7 @@ Important: Return ONLY the JSON array, no markdown, no explanation.`;
       },
     });
 
-    const content = response.choices[0].message.content as string;
+    const content = response;
     let shots: Array<{
       shotNumber: number;
       sceneName: string;
@@ -567,7 +567,7 @@ Important: Return ONLY the JSON array, no markdown, no explanation.`;
     const styleKw = styleMap[project.style] ?? "photorealistic, cinematic";
 
     // 生成帧提示词（针对不同模型优化）
-    const framePromptResponse = await invokeLLM({
+    const framePromptResponse = await callGPT({
       messages: [
         {
           role: "system",
@@ -599,7 +599,7 @@ Return ONLY the prompt text.`,
       ],
     });
 
-    const framePrompt = (framePromptResponse.choices[0].message.content as string).trim();
+    const framePrompt = framePromptResponse.trim();
 
     // 合并参考图（subjectRefUrls 优先）
     const allRefUrls = [...(subjectRefUrls ?? []), ...(referenceImageUrls ?? [])];
@@ -671,7 +671,7 @@ Return ONLY the prompt text.`,
       };
       const styleKw = styleMap[project?.style ?? "realistic"] ?? "photorealistic, cinematic";
 
-      const response = await invokeLLM({
+      const response = await callGPT({
         messages: [
           {
             role: "system",
@@ -706,7 +706,7 @@ Return ONLY the prompt text.`,
         ],
       });
 
-      const videoPrompt = (response.choices[0].message.content as string).trim();
+      const videoPrompt = response.trim();
 
       await (await getDb())!
         .update(scriptShots)
@@ -880,7 +880,7 @@ Return ONLY the prompt text.`,
               const batchStyleKw = batchStyleMap[project.style] ?? "photorealistic, cinematic";
               const batchAspectLabel = project.aspectRatio === "portrait" ? "9:16 vertical portrait" : "16:9 horizontal landscape";
 
-              const framePromptResponse = await invokeLLM({
+              const framePromptResponse = await callGPT({
                 messages: [
                   {
                     role: "system",
@@ -912,7 +912,7 @@ Return ONLY the prompt text.`,
                 ],
               });
 
-              const framePrompt = (framePromptResponse.choices[0].message.content as string).trim();
+              const framePrompt = framePromptResponse.trim();
 
               const batchImageEngine = project.imageEngine || "doubao-seedream-4-5-251128";
               const batchIsSeedream = batchImageEngine.startsWith("doubao-seedream");
@@ -981,7 +981,7 @@ Return ONLY the prompt text.`,
             const batchVidStyleKw = batchVidStyleMap[project.style] ?? "photorealistic, cinematic";
 
             try {
-              const vpResponse = await invokeLLM({
+              const vpResponse = await callGPT({
                 messages: [
                   {
                     role: "system",
@@ -1011,7 +1011,7 @@ Return ONLY the prompt text.`,
                 ],
               });
 
-              const videoPrompt = (vpResponse.choices[0].message.content as string).trim();
+              const videoPrompt = vpResponse.trim();
               await (await getDb())!
                 .update(scriptShots)
                 .set({ videoPrompt })
@@ -1300,13 +1300,13 @@ Return ONLY the prompt text.`,
         prop: `Generate a Midjourney v7 prompt for a prop/object reference. Prop: "${asset.name}". Description: ${asset.description ?? "(none)"}. Style: ${styleKw}. Format: ${aspectNote} product shot, clean background, no text, no watermark.`,
       };
 
-      const res = await invokeLLM({
+      const res = await callGPT({
         messages: [
           { role: "system", content: "You are a professional Midjourney prompt engineer. Output ONLY the raw prompt text, no explanation, no quotes, no markdown." },
           { role: "user", content: typePrompts[asset.type] },
         ],
       });
-      const rawContent = res.choices[0]?.message?.content;
+      const rawContent = res;
       const mjPrompt = (typeof rawContent === "string" ? rawContent : "").trim();
       await db!.update(overseasAssets).set({ mjPrompt }).where(eq(overseasAssets.id, asset.id));
       return { mjPrompt };
@@ -1421,13 +1421,13 @@ Return ONLY the prompt text.`,
         throw new Error(`Unsupported asset type: ${asset.type}`);
       }
 
-      const res = await invokeLLM({
+      const res = await callGPT({
         messages: [
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
       });
-      const rawContent = res.choices[0]?.message?.content;
+      const rawContent = res;
       const mjPrompt = (typeof rawContent === "string" ? rawContent : "").trim();
       if (mjPrompt) {
         await db!.update(overseasAssets).set({ mjPrompt, stylePrompt: mjPrompt }).where(eq(overseasAssets.id, asset.id));
@@ -1560,13 +1560,13 @@ Return ONLY the prompt text.`,
             continue;
           }
 
-          const res = await invokeLLM({
+          const res = await callGPT({
             messages: [
               { role: "system", content: systemPrompt },
               { role: "user", content: userPrompt },
             ],
           });
-          const rawContent = res.choices[0]?.message?.content;
+          const rawContent = res;
           const mjPrompt = (typeof rawContent === "string" ? rawContent : "").trim();
           if (mjPrompt) {
             await db!.update(overseasAssets).set({ mjPrompt, stylePrompt: mjPrompt }).where(eq(overseasAssets.id, asset.id));
@@ -1833,14 +1833,14 @@ Return a JSON array of shots with this exact schema:
 
 Return ONLY the JSON array.`;
 
-          const response = await invokeLLM({
+          const response = await callGPT({
             messages: [
               { role: "system", content: systemPrompt },
               { role: "user", content: userPrompt },
             ],
           });
 
-          const content = response.choices[0].message.content as string;
+          const content = response;
           let shots: Array<{
             shotNumber: number; sceneName: string; shotType: string;
             visualDescription: string; dialogue: string; characters: string; emotion: string;
@@ -1956,7 +1956,7 @@ ${scriptText.slice(0, 80000)}
   ]
 }`;
 
-      const response = await invokeLLM({
+      const response = await callGPT({
         messages: [{ role: "user", content: prompt }],
         response_format: {
           type: "json_schema",
@@ -2034,7 +2034,7 @@ ${scriptText.slice(0, 80000)}
         },
       });
 
-      const content = response.choices[0].message.content as string;
+      const content = response;
       const parsed = JSON.parse(content) as {
         episodes: Array<{ id: string; number: number; title: string; duration: number; synopsis: string }>;
         characters: Array<{ name: string; role: string; appearance: string; costume: string; marks: string; personality: string }>;
@@ -2126,7 +2126,7 @@ ${scriptText.slice(0, 80000)}
 
       if (!scriptContent.trim()) throw new Error("No script content found. Please import scripts first.");
 
-      const response = await invokeLLM({
+      const response = await callGPT({
         messages: [
           {
             role: "system",
@@ -2152,7 +2152,7 @@ Rules:
         ],
       });
 
-      const content = response.choices[0].message.content as string;
+      const content = response;
       let detectedAssets: Array<{ type: "character" | "scene" | "prop"; name: string; description: string; tags: string }>;
       try {
         const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
@@ -2282,7 +2282,7 @@ Rules:
           // 生成生图提示词（如果没有）
           let imgGenerated = false;
           if (!shot.firstFramePrompt) {
-            const imgPromptRes = await invokeLLM({
+            const imgPromptRes = await callGPT({
               messages: [
                 {
                   role: "system",
@@ -2315,7 +2315,7 @@ Return ONLY the prompt text.`,
                 },
               ],
             });
-            const firstFramePrompt = (imgPromptRes.choices[0].message.content as string).trim();
+            const firstFramePrompt = imgPromptRes.trim();
             await db!.update(scriptShots)
               .set({ firstFramePrompt })
               .where(eq(scriptShots.id, shot.id));
@@ -2331,7 +2331,7 @@ Return ONLY the prompt text.`,
               cg: "3D CGI, Unreal Engine quality",
             };
             const vidStyleKw = vidStyleMap[project.style] ?? "photorealistic, cinematic";
-            const vidPromptRes = await invokeLLM({
+            const vidPromptRes = await callGPT({
               messages: [
                 {
                   role: "system",
@@ -2360,7 +2360,7 @@ Return ONLY the prompt text.`,
                 },
               ],
             });
-            const videoPrompt = (vidPromptRes.choices[0].message.content as string).trim();
+            const videoPrompt = vidPromptRes.trim();
             await db!.update(scriptShots)
               .set({ videoPrompt })
               .where(eq(scriptShots.id, shot.id));
@@ -2521,8 +2521,8 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
         ...input.history.map(h => ({ role: h.role as "user" | "assistant", content: h.content })),
         { role: "user", content: input.message },
       ];
-      const response = await invokeLLM({ messages });
-      const reply = (response.choices[0].message.content as string).trim();
+      const response = await callGPT({ messages });
+      const reply = response.trim();
       return { reply };
     }),
 });

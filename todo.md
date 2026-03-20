@@ -133,3 +133,10 @@
 
 - [x] 删除主体面板「一键全流程」按钮及相关状态/逻辑
 - [x] 清理多余导入（Zap、CheckCircle2）和空行
+
+## 2026-03-20 跑量剧 LLM 改走向量引擎代理
+
+- [x] overseas.ts 中所有 invokeLLM（14 处）替换为 callGPT（向量引擎代理，gpt-5.4-mini）
+- [x] 删除 invokeLLM import，添加 callGPT import
+- [x] 修复 .choices[0].message.content 解构（callGPT 直接返回字符串）
+- [x] TypeScript 零错误，64/65 测试通过（1 个外部 API 值班性失败）
