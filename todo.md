@@ -78,3 +78,11 @@
 - [x] 导出全集视频列表：一键导出当前项目所有视频 URL 列表（CSV/TXT）
 - [x] 端到端 API 真实调用测试：首帧生成（Seedream 5.0）→ 视频生成（Seedance 1.5 Pro，96.7秒）
 - [x] 修复测试中发现的 bug：Seedance 503 自动重试（最多3次，间隔10秒）
+
+## 2026-03-20 主体部分 API 修复
+
+- [x] 风格定调：MJ 调用向量引擎（VectorEngine MJ API，mjImagine+轮询），豆包4.5 直接调用火山引擎 ARK，禁止通过向量引擎调用豆包模型
+- [x] 多视角：豆包5.0 直接调用火山引擎 ARK，禁止通过向量引擎调用豆包模型
+- [x] 市场默认模型：海外市场（美/英/德/法/西/巴）默认 MJ，中国/日本/韩国/印度默认即梢4.5
+- [x] generateSeedreamImage 修改为直接调用 ARK API（不经过 VectorEngine 代理）
+- [x] 新增 generateMJImageAndWait 辅助函数（提交+轮询+返回 URL）

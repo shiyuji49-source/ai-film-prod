@@ -13,6 +13,7 @@ import {
   callClaudeSonnet, callClaudeOpus,
   generateNanoBananaImage,
   generateSeedreamImage,
+  generateMJImageAndWait,
 } from "../lib/vectorengine";
 import { ENV } from "../_core/env";
 import pLimit from "p-limit";
@@ -1624,17 +1625,15 @@ Return ONLY the prompt text.`,
       const refUrl = input.referenceImageUrl || asset.mjImageUrl || asset.styleImageUrl;
       // Scenes default to 16:9 landscape regardless of project setting
       const assetAspectRatio = input.aspectRatio || (asset.type === "scene" ? "16:9" : (isPortrait ? "9:16" : "16:9"));
-      const chosenModel = input.imageModel || "doubao-seedream-4-5-251128";
-
+       const chosenModel = input.imageModel || "doubao-seedream-4-5-251128";
       let s3Url: string;
       if (chosenModel.startsWith("doubao-seedream")) {
-        // 火山引擎 API（豆包即梦）
-        const { generateSeedreamImage } = await import("../lib/vectorengine");
+        // 火山引擎 ARK API（豆包即梢）— 直接调用，不经过 VectorEngine
         const seedreamResults = await generateSeedreamImage({
           model: chosenModel as any,
           prompt,
           image: refUrl || undefined,
-          size: assetAspectRatio === "9:16" ? "2K" : "2K",
+          size: "2K",
           watermark: false,
         });
         const seedUrl = seedreamResults[0]?.url;
@@ -1644,8 +1643,31 @@ Return ONLY the prompt text.`,
         const key = `overseas-assets/${ctx.user.id}/${asset.id}-${input.viewType}-${nanoid(6)}.jpg`;
         const { url } = await storagePut(key, buf, "image/jpeg");
         s3Url = url;
+      } else if (chosenModel === "midjourney") {
+        // Midjourney — 通过 VectorEngine MJ API（正确路径）
+        // 如果有参考图，转为 base64 传入
+        let refBase64: string | undefined;
+        if (refUrl) {
+          try {
+            const refResp = await fetch(refUrl);
+            const refBuf = Buffer.from(await refResp.arrayBuffer());
+            refBase64 = `data:image/jpeg;base64,${refBuf.toString("base64")}`;
+          } catch {
+            // 参考图获取失败，不影响生成
+          }
+        }
+        const mjImageUrl = await generateMJImageAndWait({
+          prompt,
+          referenceImageBase64: refBase64,
+        });
+        // 下载 MJ 图片并保存到 S3
+        const mjResp = await fetch(mjImageUrl);
+        const mjBuf = Buffer.from(await mjResp.arrayBuffer());
+        const mjKey = `overseas-assets/${ctx.user.id}/${asset.id}-${input.viewType}-mj-${nanoid(6)}.jpg`;
+        const { url: mjS3Url } = await storagePut(mjKey, mjBuf, "image/jpeg");
+        s3Url = mjS3Url;
       } else {
-        // VectorEngine API（nano-banana-pro 等）
+        // VectorEngine API（nano-banana-pro / Gemini 3 Pro Image 等）
         s3Url = await generateVEImage({
           prompt,
           imageUrl: refUrl || undefined,

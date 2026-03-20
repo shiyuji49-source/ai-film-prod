@@ -157,8 +157,47 @@ export async function mjDescribe(base64: string): Promise<any> {
   return res.json();
 }
 
+/**
+ * Midjourney 图片生成 — 提交任务并轮询等待完成，返回图片 URL
+ * 适用于：风格定调（MJ 模式）
+ * 通过 VectorEngine MJ API 调用（正确路径）
+ */
+export async function generateMJImageAndWait(options: {
+  prompt: string;
+  referenceImageBase64?: string;
+  botType?: "MID_JOURNEY" | "NIJI_JOURNEY";
+  timeoutMs?: number;
+}): Promise<string> {
+  const { prompt, referenceImageBase64, botType = "MID_JOURNEY", timeoutMs = 300000 } = options;
+
+  // Step 1: Submit imagine task
+  const base64Array = referenceImageBase64 ? [referenceImageBase64] : [];
+  const submitRes = await mjImagine({ prompt, base64Array, botType });
+  if (!submitRes.result) throw new Error(`MJ submit failed: ${submitRes.description}`);
+  const taskId = submitRes.result;
+
+  // Step 2: Poll until done (max timeoutMs)
+  const startTime = Date.now();
+  const pollInterval = 5000; // 5 seconds
+  while (Date.now() - startTime < timeoutMs) {
+    await new Promise(r => setTimeout(r, pollInterval));
+    const task = await mjFetchTask(taskId);
+    if (task.status === "SUCCESS") {
+      const imageUrl = task.imageUrl || task.image_url;
+      if (!imageUrl) throw new Error("MJ task succeeded but no imageUrl returned");
+      return imageUrl;
+    }
+    if (task.status === "FAILURE") {
+      throw new Error(`MJ task failed: ${task.failReason || "unknown reason"}`);
+    }
+    // SUBMITTED, IN_PROGRESS, etc. - keep polling
+  }
+  throw new Error(`MJ task timed out after ${timeoutMs / 1000}s (taskId: ${taskId})`);
+}
+
 // ============================================================
-// Seedream (豆包图片生成 via VectorEngine)
+// Seedream (豆包图片生成)
+// 注意：豆包模型必须直接调用火山引擎 ARK API，禁止通过 VectorEngine 代理调用豆包模型
 // ============================================================
 
 export type SeedreamModel =
@@ -176,20 +215,26 @@ export interface SeedreamOptions {
   watermark?: boolean;
 }
 
+/**
+ * 豆包即梦图片生成 — 直接调用火山引擎 ARK API
+ * 适用于：风格定调（豆包4.5）、多视角（豆包5.0）、首帧生成（豆包4.5/5.0）
+ * 禁止通过 VectorEngine 代理调用豆包模型
+ */
 export async function generateSeedreamImage(options: SeedreamOptions): Promise<{ url: string }[]> {
   const { model = "doubao-seedream-5-0-260128", prompt, image, size = "2K", watermark = false } = options;
   const body: any = { model, prompt, size, watermark, response_format: "url" };
   if (image) body.image = image;
 
-  const res = await fetch(`${getBaseUrl()}/v1/images/generations`, {
+  // 直接调用火山引擎 ARK API（不经过 VectorEngine 代理）
+  const res = await fetch(`${getArkUrl()}/images/generations`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${getApiKey()}`,
+      "Authorization": `Bearer ${getArkKey()}`,
     },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`Seedream error (${res.status}): ${await res.text()}`);
+  if (!res.ok) throw new Error(`Seedream ARK error (${res.status}): ${await res.text()}`);
   const data = await res.json();
   return data.data?.map((d: any) => ({ url: d.url })) ?? [];
 }

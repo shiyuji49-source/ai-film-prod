@@ -120,16 +120,20 @@ export interface MarketOption {
   defaultImageEngine?: string;
 }
 
-/** 目标市场选项（前后端共用） */
+/** 目标市场选项（前后端共用）
+ * 风格定调默认模型规则：
+ * - 中国/日本/韩国/印度 → 即梢 4.5（火山引擎 ARK）
+ * - 其他海外市场 → Midjourney（VectorEngine）
+ */
 export const MARKET_OPTIONS: MarketOption[] = [
   { value: "cn", label: "🇨🇳 中国", defaultImageEngine: "doubao-seedream-4-5-251128" },
-  { value: "us", label: "🇺🇸 美国", defaultImageEngine: "nano-banana-pro" },
-  { value: "uk", label: "🇬🇧 英国", defaultImageEngine: "nano-banana-pro" },
+  { value: "us", label: "🇺🇸 美国", defaultImageEngine: "midjourney" },
+  { value: "uk", label: "🇬🇧 英国", defaultImageEngine: "midjourney" },
   { value: "es", label: "🇪🇸 西班牙", defaultImageEngine: "midjourney" },
   { value: "in", label: "🇮🇳 印度", defaultImageEngine: "doubao-seedream-4-5-251128" },
   { value: "br", label: "🇧🇷 巴西", defaultImageEngine: "midjourney" },
-  { value: "de", label: "🇩🇪 德国", defaultImageEngine: "nano-banana-pro" },
-  { value: "fr", label: "🇫🇷 法国", defaultImageEngine: "nano-banana-pro" },
+  { value: "de", label: "🇩🇪 德国", defaultImageEngine: "midjourney" },
+  { value: "fr", label: "🇫🇷 法国", defaultImageEngine: "midjourney" },
   { value: "jp", label: "🇯🇵 日本", defaultImageEngine: "doubao-seedream-4-5-251128" },
   { value: "kr", label: "🇰🇷 韩国", defaultImageEngine: "doubao-seedream-4-5-251128" },
 ];
