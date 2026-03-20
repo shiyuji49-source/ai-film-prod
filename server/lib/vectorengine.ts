@@ -12,11 +12,11 @@ const getApiKey = () => ENV.vectorEngineApiKey;
 
 // ============================================================
 // LLM Models (via VectorEngine OpenAI-compatible chat API)
-// 所有工作流 LLM 统一使用 gpt-5.4-mini
+// 所有工作流 LLM 统一使用 claude-sonnet-4-6
 // ============================================================
 
-/** 默认 LLM 模型：gpt-5.4-mini — 适用于所有工作流任务 */
-export const GPT_MINI = "gpt-5.4-mini";
+/** 默认 LLM 模型：claude-sonnet-4-6 — 适用于所有工作流任务 */
+export const GPT_MINI = "claude-sonnet-4-6";
 /** @deprecated 已重命名为 GPT_MINI */
 export const CLAUDE_OPUS = GPT_MINI;
 /** @deprecated 已重命名为 GPT_MINI */

@@ -146,3 +146,12 @@
 - [x] 修复：callGPT 重试次数 3→6，等待时间 2s→5s 起步，最长 60s
 - [x] batchParseScripts 集间加 1.5s 间隔，避免连续触发限流
 - [x] 测试 Excel/Word/TXT 三种格式上传均正常
+
+## 2026-03-20 全部 LLM 改为 claude-sonnet-4-6（向量引擎）
+
+- [x] vectorengine.ts GPT_MINI 常量改为 claude-sonnet-4-6
+- [x] server/_core/llm.ts invokeLLM 模型改为 claude-sonnet-4-6
+- [x] shared/const.ts DEFAULT_LLM_MODEL 改为 claude-sonnet-4-6
+- [x] vectorengine.test.ts 测试模型改为 claude-sonnet-4-6
+- [x] core.test.ts 断言改为 claude-sonnet-4-6
+- [x] 65/65 测试全部通过

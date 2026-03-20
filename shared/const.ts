@@ -1,10 +1,10 @@
 export const COOKIE_NAME = "app_session_id";
 
-// ── LLM 模型配置 — 所有工作流统一使用 gpt-5.4-mini ──────────────────────────
-export const DEFAULT_LLM_MODEL = "gpt-5.4-mini";
-/** @deprecated 保留向后兼容，实际使用 gpt-5.4-mini */
+// ── LLM 模型配置 — 所有工作流统一使用 claude-sonnet-4-6 ────────────────────
+export const DEFAULT_LLM_MODEL = "claude-sonnet-4-6";
+/** @deprecated 保留向后兼容，实际使用 claude-sonnet-4-6 */
 export const GEMINI_PRO_MODEL = DEFAULT_LLM_MODEL;
-/** @deprecated 保留向后兼容，实际使用 gpt-5.4-mini */
+/** @deprecated 保留向后兼容，实际使用 claude-sonnet-4-6 */
 export const GEMINI_FLASH_MODEL = DEFAULT_LLM_MODEL;
 
 // thinking_level 配置（保留向后兼容）

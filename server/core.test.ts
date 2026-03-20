@@ -92,12 +92,12 @@ describe("VectorEngine Module", () => {
     expect(ve.queryVideoTask).toBeDefined();
   });
 
-  it("has correct LLM model constants (all use gpt-5.4-mini)", async () => {
+  it("has correct LLM model constants (all use claude-sonnet-4-6)", async () => {
     const ve = await import("./lib/vectorengine");
-    // All LLM calls now use gpt-5.4-mini via VectorEngine
-    expect(ve.GPT_MINI).toBe("gpt-5.4-mini");
-    expect(ve.CLAUDE_OPUS).toBe("gpt-5.4-mini");
-    expect(ve.CLAUDE_SONNET).toBe("gpt-5.4-mini");
+    // All LLM calls now use claude-sonnet-4-6 via VectorEngine
+    expect(ve.GPT_MINI).toBe("claude-sonnet-4-6");
+    expect(ve.CLAUDE_OPUS).toBe("claude-sonnet-4-6");
+    expect(ve.CLAUDE_SONNET).toBe("claude-sonnet-4-6");
   });
 
   it("IMAGE_MODELS includes Seedream, MJ, and Gemini 3 Pro Image", async () => {
