@@ -4,6 +4,9 @@
  */
 import { ENV } from "../_core/env";
 
+const getArkUrl = () => ENV.arkApiUrl || "https://ark.cn-beijing.volces.com/api/v3";
+const getArkKey = () => ENV.arkApiKey;
+
 const getBaseUrl = () => ENV.vectorEngineApiUrl || "https://api.vectorengine.ai";
 const getApiKey = () => ENV.vectorEngineApiKey;
 
@@ -209,7 +212,7 @@ export interface SeedanceOptions {
 export async function createSeedanceVideo(options: SeedanceOptions): Promise<{ id: string; status: string }> {
   const {
     prompt, imageUrl, lastFrameUrl,
-    ratio = "16:9", resolution = "1080p",
+    ratio = "16:9",
     duration = 5, smartDuration = false,
     watermark = false
   } = options;
@@ -222,18 +225,14 @@ export async function createSeedanceVideo(options: SeedanceOptions): Promise<{ i
     content.push({ type: "image_url", image_url: { url: lastFrameUrl } });
   }
 
-  // 解析分辨率为数字宽高（不支持的比例使用 auto）
-  const resolutionMap: Record<string, number> = { "480p": 480, "720p": 720, "1080p": 1080 };
-  const resHeight = resolutionMap[resolution] ?? 1080;
-
   // 视频时长：4-12 秒
   const clampedDuration = Math.max(4, Math.min(12, duration));
 
+  // ARK API does NOT support resolution field - use ratio only
   const body: any = {
     model: "doubao-seedance-1-5-pro-251215",
     content,
-    ratio: ratio === "auto" ? undefined : ratio,
-    resolution: resHeight,
+    ratio: ratio === "auto" ? "9:16" : ratio,
     watermark,
   };
 
@@ -242,11 +241,12 @@ export async function createSeedanceVideo(options: SeedanceOptions): Promise<{ i
   }
   // smartDuration = true 时不传 duration，模型自动决定时长
 
-  const res = await fetch(`${getBaseUrl()}/volc/v1/contents/generations/tasks`, {
+  // Use ARK API directly (VectorEngine proxy does not have Seedance 1.5 Pro channel)
+  const res = await fetch(`${getArkUrl()}/contents/generations/tasks`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "Authorization": `Bearer ${getApiKey()}`,
+      "Authorization": `Bearer ${getArkKey()}`,
     },
     body: JSON.stringify(body),
   });
@@ -255,8 +255,9 @@ export async function createSeedanceVideo(options: SeedanceOptions): Promise<{ i
 }
 
 export async function querySeedanceTask(taskId: string): Promise<any> {
-  const res = await fetch(`${getBaseUrl()}/volc/v1/contents/generations/tasks/${taskId}`, {
-    headers: { "Authorization": `Bearer ${getApiKey()}` },
+  // Use ARK API directly for task status queries
+  const res = await fetch(`${getArkUrl()}/contents/generations/tasks/${taskId}`, {
+    headers: { "Authorization": `Bearer ${getArkKey()}` },
   });
   if (!res.ok) throw new Error(`Seedance query error (${res.status}): ${await res.text()}`);
   return res.json();

@@ -15,6 +15,7 @@ import {
   generateSeedreamImage,
 } from "../lib/vectorengine";
 import { ENV } from "../_core/env";
+import pLimit from "p-limit";
 
 // ─── 项目 CRUD ────────────────────────────────────────────────────────────────
 
@@ -118,16 +119,30 @@ async function generateSeedance15Video(params: {
   generateAudio?: boolean;
 }): Promise<string> {
   const { prompt, imageUrl, lastFrameUrl, aspectRatio, resolution = "1080p", duration, smartDuration = false } = params;
-  const result = await createSeedanceVideo({
-    prompt,
-    imageUrl,
-    lastFrameUrl,
-    ratio: aspectRatio || "9:16",
-    resolution,
-    duration,
-    smartDuration,
-    watermark: false,
-  });
+
+  // 自动重试：Seedance API 偶发 503（无可用渠道），最多重试 3 次，间隔 10 秒
+  let result: { id: string; status: string } | undefined;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      result = await createSeedanceVideo({
+        prompt,
+        imageUrl,
+        lastFrameUrl,
+        ratio: aspectRatio || "9:16",
+        resolution,
+        duration,
+        smartDuration,
+        watermark: false,
+      });
+      break; // 成功则跳出重试循环
+    } catch (err: any) {
+      const is503 = err?.message?.includes("503") || err?.message?.includes("无可用渠道") || err?.message?.includes("No available channels");
+      if (!is503 || attempt >= 2) throw err;
+      console.warn(`[Seedance] 503 on attempt ${attempt + 1}, retrying in 10s...`);
+      await new Promise((r) => setTimeout(r, 10000));
+    }
+  }
+  if (!result) throw new Error("Seedance failed after retries");
 
   const taskId = result.id;
   for (let i = 0; i < 60; i++) {
@@ -840,29 +855,36 @@ Return ONLY the prompt text.`,
     let failed = 0;
     const errors: Array<{ shotId: number; episodeNumber: number; shotNumber: number; error: string }> = [];
 
-    // 串行处理每个镜头（避免 API 限流）
-    for (const shot of shotsToProcess) {
-      try {
-        // STEP A: 生成首帧（如果没有，且 mode 包含 image）
-        if (doImage && !shot.firstFrameUrl) {
-          await (await getDb())!
-            .update(scriptShots)
-            .set({ status: "generating_frame" })
-            .where(eq(scriptShots.id, shot.id));
+    // 并发处理（图片生成：3并发；视频生成：2并发，避免限流）
+    // 图片生成和视频生成使用不同的并发限制
+    const imageLimit = pLimit(3);  // Seedream/VE 图片生成：3并发
+    const videoLimit = pLimit(2);  // 视频生成：2并发（API 限流较严）
 
-          const batchStyleMap: Record<string, string> = {
-            realistic: "photorealistic, cinematic, real human, 8K, film grain",
-            animation: "2D animation, cel-shaded, clean lines, vibrant colors",
-            cg: "3D CGI, Unreal Engine 5, hyper-detailed, ray tracing",
-          };
-          const batchStyleKw = batchStyleMap[project.style] ?? "photorealistic, cinematic";
-          const batchAspectLabel = project.aspectRatio === "portrait" ? "9:16 vertical portrait" : "16:9 horizontal landscape";
+    // 第一阶段：并发生成首帧图片
+    if (doImage) {
+      await Promise.all(
+        shotsToProcess.map((shot) =>
+          imageLimit(async () => {
+            if (shot.firstFrameUrl) return; // 已有首帧，跳过
+            try {
+              await (await getDb())!
+                .update(scriptShots)
+                .set({ status: "generating_frame" })
+                .where(eq(scriptShots.id, shot.id));
 
-          const framePromptResponse = await invokeLLM({
-            messages: [
-              {
-                role: "system",
-                content: `You are an expert AI image prompt writer for ${project.style} short drama production.
+              const batchStyleMap: Record<string, string> = {
+                realistic: "photorealistic, cinematic, real human, 8K, film grain",
+                animation: "2D animation, cel-shaded, clean lines, vibrant colors",
+                cg: "3D CGI, Unreal Engine 5, hyper-detailed, ray tracing",
+              };
+              const batchStyleKw = batchStyleMap[project.style] ?? "photorealistic, cinematic";
+              const batchAspectLabel = project.aspectRatio === "portrait" ? "9:16 vertical portrait" : "16:9 horizontal landscape";
+
+              const framePromptResponse = await invokeLLM({
+                messages: [
+                  {
+                    role: "system",
+                    content: `You are an expert AI image prompt writer for ${project.style} short drama production.
 Generate a detailed, cinematic image prompt for the FIRST frame (opening composition).
 Style: ${batchStyleKw}
 Aspect ratio: ${batchAspectLabel}
@@ -874,10 +896,10 @@ Rules:
 - NO subtitles, NO text overlays, NO watermarks
 - Write in flowing descriptive English prose (NOT keyword lists)
 - Keep under 100 words`,
-              },
-              {
-                role: "user",
-                content: `Shot: ${shot.visualDescription}
+                  },
+                  {
+                    role: "user",
+                    content: `Shot: ${shot.visualDescription}
 ${shot.dialogue ? `Dialogue: "${shot.dialogue}"` : ""}
 Characters: ${shot.characters || "none"}
 Emotion: ${shot.emotion || "neutral"}
@@ -886,69 +908,84 @@ Scene: ${shot.sceneName || ""}
 
 Write the FIRST frame (opening composition as shot begins, establishing mood and positioning) prompt.
 Return ONLY the prompt text.`,
-              },
-            ],
-          });
+                  },
+                ],
+              });
 
-          const framePrompt = (framePromptResponse.choices[0].message.content as string).trim();
+              const framePrompt = (framePromptResponse.choices[0].message.content as string).trim();
 
-          // 选择图片引擎：优先 project.imageEngine，默认 Seedream 4.5
-          const batchImageEngine = project.imageEngine || "doubao-seedream-4-5-251128";
-          const batchIsSeedream = batchImageEngine.startsWith("doubao-seedream");
-          const batchRefUrl = globalRefUrls.length > 0 ? globalRefUrls[0] : undefined;
-          const batchAspectRatio = project.aspectRatio === "portrait" ? "9:16" : "16:9";
+              const batchImageEngine = project.imageEngine || "doubao-seedream-4-5-251128";
+              const batchIsSeedream = batchImageEngine.startsWith("doubao-seedream");
+              const batchRefUrl = globalRefUrls.length > 0 ? globalRefUrls[0] : undefined;
+              const batchAspectRatio = project.aspectRatio === "portrait" ? "9:16" : "16:9";
 
-          let frameS3Url: string;
-          if (batchIsSeedream) {
-            const seedreamResults = await generateSeedreamImage({
-              model: batchImageEngine as any,
-              prompt: framePrompt,
-              image: batchRefUrl,
-              size: "2K",
-              watermark: false,
-            });
-            const rawUrl = seedreamResults[0]?.url;
-            if (!rawUrl) throw new Error("Seedream returned no URL");
-            const resp = await fetch(rawUrl);
-            const buf = Buffer.from(await resp.arrayBuffer());
-            const key = `frames/${ctx.user.id}/${shot.id}-first-${nanoid(8)}.jpg`;
-            const { url } = await storagePut(key, buf, "image/jpeg");
-            frameS3Url = url;
-          } else {
-            frameS3Url = await generateVEImage({
-              prompt: framePrompt,
-              imageUrl: batchRefUrl,
-              aspectRatio: batchAspectRatio,
-              s3KeyPrefix: "frames",
-              userId: ctx.user.id,
-            });
-          }
+              let frameS3Url: string;
+              if (batchIsSeedream) {
+                const seedreamResults = await generateSeedreamImage({
+                  model: batchImageEngine as any,
+                  prompt: framePrompt,
+                  image: batchRefUrl,
+                  size: "2K",
+                  watermark: false,
+                });
+                const rawUrl = seedreamResults[0]?.url;
+                if (!rawUrl) throw new Error("Seedream returned no URL");
+                const resp = await fetch(rawUrl);
+                const buf = Buffer.from(await resp.arrayBuffer());
+                const key = `frames/${ctx.user.id}/${shot.id}-first-${nanoid(8)}.jpg`;
+                const { url } = await storagePut(key, buf, "image/jpeg");
+                frameS3Url = url;
+              } else {
+                frameS3Url = await generateVEImage({
+                  prompt: framePrompt,
+                  imageUrl: batchRefUrl,
+                  aspectRatio: batchAspectRatio,
+                  s3KeyPrefix: "frames",
+                  userId: ctx.user.id,
+                });
+              }
 
-          await (await getDb())!
-            .update(scriptShots)
-            .set({ firstFrameUrl: frameS3Url, firstFramePrompt: framePrompt, status: "frame_done", imageEngine: batchImageEngine })
-            .where(eq(scriptShots.id, shot.id));
+              await (await getDb())!
+                .update(scriptShots)
+                .set({ firstFrameUrl: frameS3Url, firstFramePrompt: framePrompt, status: "frame_done", imageEngine: batchImageEngine })
+                .where(eq(scriptShots.id, shot.id));
 
-          // 更新本地变量
-          shot.firstFrameUrl = frameS3Url;
-          shot.firstFramePrompt = framePrompt;
-          shot.status = "frame_done";
-        }
+              shot.firstFrameUrl = frameS3Url;
+              shot.firstFramePrompt = framePrompt;
+              shot.status = "frame_done";
+            } catch (err) {
+              const errorMessage = err instanceof Error ? err.message : String(err);
+              await (await getDb())!
+                .update(scriptShots)
+                .set({ status: "failed", errorMessage })
+                .where(eq(scriptShots.id, shot.id));
+              errors.push({ shotId: shot.id, episodeNumber: shot.episodeNumber, shotNumber: shot.shotNumber, error: `[frame] ${errorMessage}` });
+              failed++;
+            }
+          })
+        )
+      );
+    }
 
-        // STEP B: 生成视频提示词（针对 Seedance 1.5 Pro 优化，仅 doVideo 时）
-        if (doVideo && !shot.videoPrompt) {
-          const batchVidStyleMap: Record<string, string> = {
-            realistic: "photorealistic, cinematic, real human actors",
-            animation: "2D animation style",
-            cg: "3D CGI, Unreal Engine quality",
-          };
-          const batchVidStyleKw = batchVidStyleMap[project.style] ?? "photorealistic, cinematic";
+    // 第二阶段：并发生成视频提示词（3并发，LLM 较快）
+    if (doVideo) {
+      await Promise.all(
+        shotsToProcess.map((shot) =>
+          imageLimit(async () => {
+            if (shot.videoPrompt) return; // 已有提示词，跳过
+            const batchVidStyleMap: Record<string, string> = {
+              realistic: "photorealistic, cinematic, real human actors",
+              animation: "2D animation style",
+              cg: "3D CGI, Unreal Engine quality",
+            };
+            const batchVidStyleKw = batchVidStyleMap[project.style] ?? "photorealistic, cinematic";
 
-          const vpResponse = await invokeLLM({
-            messages: [
-              {
-                role: "system",
-                content: `You are an expert AI video prompt writer for Seedance 1.5 Pro (doubao-seedance-1-5-pro).
+            try {
+              const vpResponse = await invokeLLM({
+                messages: [
+                  {
+                    role: "system",
+                    content: `You are an expert AI video prompt writer for Seedance 1.5 Pro (doubao-seedance-1-5-pro).
 Seedance 1.5 Pro excels at smooth character movement, cinematic camera work, and realistic lighting.
 Write prompts that:
 1. Start with the main subject and their action (what they're doing RIGHT NOW)
@@ -957,10 +994,10 @@ Write prompts that:
 4. Keep it 2-3 sentences, under 80 words
 5. NO background music, NO subtitles, NO watermarks
 Style: ${batchVidStyleKw}`,
-              },
-              {
-                role: "user",
-                content: `Shot: ${shot.visualDescription}
+                  },
+                  {
+                    role: "user",
+                    content: `Shot: ${shot.visualDescription}
 ${shot.dialogue ? `Spoken dialogue: "${shot.dialogue}"` : ""}
 Characters: ${shot.characters || "none"}
 Emotion: ${shot.emotion || "neutral"}
@@ -970,86 +1007,103 @@ Scene: ${shot.sceneName || ""}
 Write a Seedance 1.5 Pro video prompt.
 ${shot.dialogue ? `Character speaks: "${shot.dialogue}"` : ""}
 Return ONLY the prompt text.`,
-              },
-            ],
-          });
+                  },
+                ],
+              });
 
-          const videoPrompt = (vpResponse.choices[0].message.content as string).trim();
-          await (await getDb())!
-            .update(scriptShots)
-            .set({ videoPrompt })
-            .where(eq(scriptShots.id, shot.id));
-          shot.videoPrompt = videoPrompt;
-        }
+              const videoPrompt = (vpResponse.choices[0].message.content as string).trim();
+              await (await getDb())!
+                .update(scriptShots)
+                .set({ videoPrompt })
+                .where(eq(scriptShots.id, shot.id));
+              shot.videoPrompt = videoPrompt;
+            } catch (err) {
+              // 视频提示词生成失败不影响整体流程，使用 visualDescription 作为备用
+              shot.videoPrompt = shot.visualDescription ?? "";
+            }
+          })
+        )
+      );
+    }
 
-        // STEP C: 生成视频（仅 doVideo 时）
-        if (!doVideo) { processed++; continue; }
-        await (await getDb())!
-          .update(scriptShots)
-          .set({ status: "generating_video", videoEngine: engine })
-          .where(eq(scriptShots.id, shot.id));
+    // 第三阶段：并发生成视频（2并发，视频 API 耗时长且限流严）
+    if (doVideo) {
+      await Promise.all(
+        shotsToProcess
+          .filter((s) => !errors.find((e) => e.shotId === s.id)) // 跳过已失败的
+          .map((shot) =>
+            videoLimit(async () => {
+              try {
+                if (!shot.firstFrameUrl) {
+                  errors.push({ shotId: shot.id, episodeNumber: shot.episodeNumber, shotNumber: shot.shotNumber, error: "[video] No first frame available" });
+                  failed++;
+                  return;
+                }
+                await (await getDb())!
+                  .update(scriptShots)
+                  .set({ status: "generating_video", videoEngine: engine })
+                  .where(eq(scriptShots.id, shot.id));
 
-        const [jobResult] = await (await getDb())!.insert(videoJobs).values({
-          userId: ctx.user.id,
-          shotId: shot.id,
-          engine,
-          status: "processing",
-        });
-        const jobId = (jobResult as any).insertId as number;
+                const [jobResult] = await (await getDb())!.insert(videoJobs).values({
+                  userId: ctx.user.id,
+                  shotId: shot.id,
+                  engine,
+                  status: "processing",
+                });
+                const jobId = (jobResult as any).insertId as number;
 
-        let videoUrl: string;
+                let videoUrl: string;
+                if (engine === "seedance_1_5") {
+                  videoUrl = await generateSeedance15Video({
+                    prompt: shot.videoPrompt ?? shot.visualDescription ?? "",
+                    imageUrl: shot.firstFrameUrl!,
+                    aspectRatio,
+                    resolution: resolution as "480p" | "720p" | "1080p" | undefined,
+                    duration,
+                    smartDuration,
+                    generateAudio,
+                  });
+                } else {
+                  const model = ENGINE_TO_MODEL[engine] || "veo-3.1-4k";
+                  videoUrl = await generateUnifiedVideo({
+                    prompt: shot.videoPrompt ?? shot.visualDescription ?? "",
+                    imageUrl: shot.firstFrameUrl!,
+                    model,
+                    referenceImage: globalRefUrls.length > 0 ? globalRefUrls[0] : undefined,
+                    aspectRatio,
+                  });
+                }
 
-        if (engine === "seedance_1_5") {
-          videoUrl = await generateSeedance15Video({
-            prompt: shot.videoPrompt ?? shot.visualDescription ?? "",
-            imageUrl: shot.firstFrameUrl!,
-            aspectRatio,
-            resolution: resolution as "480p" | "720p" | "1080p" | undefined,
-            duration,
-            smartDuration,
-            generateAudio,
-          });
-        } else {
-          const model = ENGINE_TO_MODEL[engine] || "veo-3.1-4k";
-          videoUrl = await generateUnifiedVideo({
-            prompt: shot.videoPrompt ?? shot.visualDescription ?? "",
-            imageUrl: shot.firstFrameUrl!,
-            model,
-            referenceImage: globalRefUrls.length > 0 ? globalRefUrls[0] : undefined,
-            aspectRatio,
-          });
-        }
+                const videoResp = await fetch(videoUrl);
+                const videoBuffer = Buffer.from(await videoResp.arrayBuffer());
+                const videoKey = `overseas/${ctx.user.id}/videos/${shot.id}-${nanoid(8)}.mp4`;
+                const { url: s3VideoUrl } = await storagePut(videoKey, videoBuffer, "video/mp4");
 
-        // 下载并上传到 S3
-        const videoResp = await fetch(videoUrl);
-        const videoBuffer = Buffer.from(await videoResp.arrayBuffer());
-        const videoKey = `overseas/${ctx.user.id}/videos/${shot.id}-${nanoid(8)}.mp4`;
-        const { url: s3VideoUrl } = await storagePut(videoKey, videoBuffer, "video/mp4");
+                await (await getDb())!
+                  .update(scriptShots)
+                  .set({ videoUrl: s3VideoUrl, videoDuration: duration, status: "done" })
+                  .where(eq(scriptShots.id, shot.id));
+                await (await getDb())!
+                  .update(videoJobs)
+                  .set({ videoUrl: s3VideoUrl, status: "done" })
+                  .where(eq(videoJobs.id, jobId));
 
-        await (await getDb())!
-          .update(scriptShots)
-          .set({ videoUrl: s3VideoUrl, videoDuration: duration, status: "done" })
-          .where(eq(scriptShots.id, shot.id));
-        await (await getDb())!
-          .update(videoJobs)
-          .set({ videoUrl: s3VideoUrl, status: "done" })
-          .where(eq(videoJobs.id, jobId));
-
-        processed++;
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        await (await getDb())!
-          .update(scriptShots)
-          .set({ status: "failed", errorMessage })
-          .where(eq(scriptShots.id, shot.id));
-        errors.push({
-          shotId: shot.id,
-          episodeNumber: shot.episodeNumber,
-          shotNumber: shot.shotNumber,
-          error: errorMessage,
-        });
-        failed++;
-      }
+                processed++;
+              } catch (err) {
+                const errorMessage = err instanceof Error ? err.message : String(err);
+                await (await getDb())!
+                  .update(scriptShots)
+                  .set({ status: "failed", errorMessage })
+                  .where(eq(scriptShots.id, shot.id));
+                errors.push({ shotId: shot.id, episodeNumber: shot.episodeNumber, shotNumber: shot.shotNumber, error: `[video] ${errorMessage}` });
+                failed++;
+              }
+            })
+          )
+      );
+    } else {
+      // 仅图片模式：统计已处理数量
+      processed = shotsToProcess.filter((s) => s.firstFrameUrl).length;
     }
 
     return {

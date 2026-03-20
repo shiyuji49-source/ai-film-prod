@@ -92,6 +92,25 @@ async function startServer() {
       res.status(500).json({ error: err.message || "文件解析失败" });
     }
   });
+  // Download proxy: proxies S3 URLs to avoid CORS issues and enable browser download
+  app.get("/api/download-proxy", async (req, res) => {
+    try {
+      const url = req.query.url as string;
+      const filename = (req.query.filename as string) || "download";
+      if (!url || !url.startsWith("http")) { res.status(400).json({ error: "Invalid URL" }); return; }
+      const response = await fetch(url);
+      if (!response.ok) { res.status(response.status).json({ error: "Fetch failed" }); return; }
+      const contentType = response.headers.get("content-type") || "application/octet-stream";
+      res.setHeader("Content-Type", contentType);
+      res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(filename)}"`); 
+      const buffer = await response.arrayBuffer();
+      res.send(Buffer.from(buffer));
+    } catch (err: any) {
+      console.error("[Download Proxy Error]", err);
+      res.status(500).json({ error: err.message || "Download failed" });
+    }
+  });
+
   // tRPC API
   app.use(
     "/api/trpc",

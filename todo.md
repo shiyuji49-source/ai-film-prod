@@ -69,3 +69,12 @@
 - [x] MARKET_OPTIONS 添加中国(🇨🇳)和西班牙(🇪🇸)
 - [x] imageEngine 默认值修复（doubao-seedream-4-5-251128）
 - [x] 新增 overseas.workflow.test.ts（24 个专项测试）
+
+## 2026-03-20 三项关键优化
+
+- [x] batchRun 并发优化：串行改为并发+限流（p-limit），提速3-5倍（图片3并发/视频2并发）
+- [x] 视频内嵌播放器：分镜板视频面板添加 HTML5 video 播放器（带播放/音量/全屏控制）
+- [x] 一键下载视频：单个视频下载按钮（代理路由解决跨域问题）
+- [x] 导出全集视频列表：一键导出当前项目所有视频 URL 列表（CSV/TXT）
+- [x] 端到端 API 真实调用测试：首帧生成（Seedream 5.0）→ 视频生成（Seedance 1.5 Pro，96.7秒）
+- [x] 修复测试中发现的 bug：Seedance 503 自动重试（最多3次，间隔10秒）

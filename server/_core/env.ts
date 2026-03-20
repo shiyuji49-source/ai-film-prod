@@ -13,6 +13,9 @@ export const ENV = {
   // VectorEngine (unified API proxy for all AI services)
   vectorEngineApiKey: process.env.VECTORENGINE_API_KEY ?? "",
   vectorEngineApiUrl: process.env.VECTORENGINE_API_URL ?? "https://api.vectorengine.ai",
+  // ARK API (Volcano Engine direct API for Seedance video generation)
+  arkApiKey: process.env.ARK_API_KEY ?? "",
+  arkApiUrl: "https://ark.cn-beijing.volces.com/api/v3",
   // Legacy (kept for backward compatibility, now routed through VectorEngine)
   geminiApiKey: process.env.GEMINI_API_KEY ?? "",
   falApiKey: process.env.FAL_API_KEY ?? "",

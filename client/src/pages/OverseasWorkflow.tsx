@@ -11,7 +11,7 @@ import {
   Film, Plus, Trash2, ChevronDown, ChevronUp,
   Wand2, ImageIcon, Video, Upload, Edit3, Check, X,
   Loader2, Globe, ArrowLeft, RefreshCw,
-  Copy, Download, Play, AlertCircle, Sparkles,
+  Copy, Download, Play, AlertCircle, Sparkles, Maximize2,
   Users, MapPin, Package, Zap, MessageSquare, FileText,
   ChevronLeft, ChevronRight, Settings, FileDown, FileUp, Shirt,
 } from "lucide-react";
@@ -1492,6 +1492,14 @@ function StoryboardTab({ projectId, project, activeEpisode, onEpisodeChange }: {
   const { data: shotsData, refetch } = trpc.overseas.listShots.useQuery({ projectId, episodeNumber: activeEpisode });
   const shots = (shotsData ?? []) as ScriptShot[];
 
+  const autoGenMutation = trpc.overseas.autoGeneratePrompts.useMutation({
+    onSuccess: (data) => {
+      toast.success(`提示词生成完成：${data.imagePrompts} 个生图、${data.videoPrompts} 个视频`);
+      refetch();
+    },
+    onError: (e) => toast.error(e.message ?? "生成失败"),
+  });
+
   const activeShot = shots.find(s => s.id === activeShotId) ?? shots[0] ?? null;
 
   // Auto-select first shot when episode changes
@@ -1529,33 +1537,11 @@ function StoryboardTab({ projectId, project, activeEpisode, onEpisodeChange }: {
           <Button
             onClick={() => {
               if (shots.length === 0) { toast.error("没有分镜，请先导入剧本"); return; }
-              toast.info("正在批量生成提示词...");
-              fetch("/api/trpc/overseas.autoGeneratePrompts", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                credentials: "include",
-                body: JSON.stringify({ json: { projectId, episodeNumber: activeEpisode } }),
-              }).then(async (r) => {
-                const text = await r.text();
-                let parsed: any;
-                try {
-                  parsed = JSON.parse(text);
-                } catch {
-                  throw new Error(text.includes("Rate") || text.includes("rate") ? "AI 服务请求频率超限，请稍后再试" : `服务器返回异常: ${text.slice(0, 100)}`);
-                }
-                if (parsed?.error) {
-                  const msg = parsed.error?.message || parsed.error?.json?.message || "生成失败";
-                  throw new Error(msg);
-                }
-                return parsed;
-              }).then((res: any) => {
-                const data = res?.result?.data?.json;
-                if (data) {
-                  toast.success(`提示词生成完成：${data.imagePrompts} 个生图、${data.videoPrompts} 个视频`);
-                  refetch();
-                }
-              }).catch((e: Error) => toast.error(e.message ?? "生成失败"));
+              if (autoGenMutation.isPending) return;
+              toast.info("正在批量生成提示词，请稍候...");
+              autoGenMutation.mutate({ projectId, episodeNumber: activeEpisode });
             }}
+            disabled={autoGenMutation.isPending}
             variant="outline"
             style={{ borderColor: C.greenBorder, color: C.green, fontWeight: 600, fontSize: 12, gap: 5, height: 30 }}
           >
@@ -1565,6 +1551,27 @@ function StoryboardTab({ projectId, project, activeEpisode, onEpisodeChange }: {
             onClick={() => setShowBatchRun(true)}
           >
             <Zap size={12} /> 一键跑量
+          </button>
+          <button
+            style={{ display: "flex", alignItems: "center", gap: 4, color: C.muted, cursor: "pointer", background: "none", border: `1px solid ${C.border}`, borderRadius: 6, fontSize: 12, padding: "4px 10px" }}
+            onClick={() => {
+              const videoShots = shots.filter(s => s.videoUrl);
+              if (videoShots.length === 0) { toast.error("本集没有已生成的视频"); return; }
+              // Export as text list with URLs
+              const lines = videoShots.map(s => `第${s.episodeNumber}集 镜头${s.shotNumber}\t${s.videoUrl}`);
+              const content = lines.join("\n");
+              const blob = new Blob([content], { type: "text/plain" });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `ep${activeEpisode}-videos.txt`;
+              a.click();
+              URL.revokeObjectURL(url);
+              toast.success(`已导出 ${videoShots.length} 个视频链接`);
+            }}
+            title="导出本集所有视频链接"
+          >
+            <FileDown size={12} /> 导出视频列表
           </button>
         </div>
       </div>
@@ -1624,65 +1631,150 @@ function ShotPreview({ shot, project, onRefresh }: { shot: ScriptShot; project: 
   const isPortrait = project.aspectRatio === "portrait";
   const hasVideo = !!shot.videoUrl;
   const hasImage = !!shot.firstFrameUrl;
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  const downloadFile = (url: string, filename: string) => {
+    const a = document.createElement("a");
+    a.href = `/api/download-proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}`;
+    a.download = filename;
+    a.click();
+  };
+
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, maxHeight: "100%" }}>
-      {/* Image/Video Preview */}
-      <div style={{
-        borderRadius: 10, overflow: "hidden", background: "oklch(0.12 0.005 240)",
-        border: `1px solid ${C.border}`,
-        ...(isPortrait
-          ? { height: "min(480px, calc(100vh - 280px))", aspectRatio: "9/16" }
-          : { width: "min(720px, calc(100vw - 400px))", aspectRatio: "16/9" }
-        ),
-        position: "relative",
-      }}>
-        {hasVideo ? (
-          <video
-            src={shot.videoUrl!}
-            controls
-            style={{ width: "100%", height: "100%", objectFit: "cover" }}
-          />
-        ) : hasImage ? (
-          <img src={shot.firstFrameUrl!} alt={`镜头 ${shot.shotNumber}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-        ) : (
-          <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8 }}>
-            <ImageIcon size={36} style={{ color: C.mutedDim }} />
-            <span style={{ fontSize: 12, color: C.muted }}>暂无首帧图片</span>
-          </div>
-        )}
-        {/* Shot Number Badge */}
+    <>
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, maxHeight: "100%" }}>
+        {/* Image/Video Preview */}
         <div style={{
-          position: "absolute", top: 10, left: 10,
-          background: "oklch(0.08 0.005 240 / 0.85)", borderRadius: 6,
-          padding: "3px 8px", fontSize: 11, color: C.green,
-          fontFamily: "'JetBrains Mono', monospace",
+          borderRadius: 10, overflow: "hidden", background: "oklch(0.12 0.005 240)",
+          border: `1px solid ${C.border}`,
+          ...(isPortrait
+            ? { height: "min(480px, calc(100vh - 280px))", aspectRatio: "9/16" }
+            : { width: "min(720px, calc(100vw - 400px))", aspectRatio: "16/9" }
+          ),
+          position: "relative",
         }}>
-          镜头 {shot.episodeNumber}.{shot.shotNumber}
+          {hasVideo ? (
+            <video
+              ref={videoRef}
+              src={shot.videoUrl!}
+              controls
+              autoPlay={false}
+              loop
+              style={{ width: "100%", height: "100%", objectFit: "cover" }}
+            />
+          ) : hasImage ? (
+            <img src={shot.firstFrameUrl!} alt={`镜头 ${shot.shotNumber}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+          ) : (
+            <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 8 }}>
+              <ImageIcon size={36} style={{ color: C.mutedDim }} />
+              <span style={{ fontSize: 12, color: C.muted }}>暂无首帧图片</span>
+            </div>
+          )}
+          {/* Shot Number Badge */}
+          <div style={{
+            position: "absolute", top: 10, left: 10,
+            background: "oklch(0.08 0.005 240 / 0.85)", borderRadius: 6,
+            padding: "3px 8px", fontSize: 11, color: C.green,
+            fontFamily: "'JetBrains Mono', monospace",
+          }}>
+            镜头 {shot.episodeNumber}.{shot.shotNumber}
+          </div>
+          {/* Video badge */}
+          {hasVideo && (
+            <div style={{
+              position: "absolute", top: 10, right: 10,
+              background: "oklch(0.08 0.005 240 / 0.85)", borderRadius: 6,
+              padding: "3px 8px", fontSize: 10, color: C.amber,
+              display: "flex", alignItems: "center", gap: 4,
+            }}>
+              <Play size={9} fill={C.amber} /> 视频已生成
+            </div>
+          )}
+          {/* Fullscreen button */}
+          {(hasVideo || hasImage) && (
+            <button
+              onClick={() => setIsFullscreen(true)}
+              style={{
+                position: "absolute", bottom: 10, right: 10,
+                width: 28, height: 28, borderRadius: 6,
+                background: "oklch(0.08 0.005 240 / 0.85)", border: `1px solid ${C.border}`,
+                cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: C.muted,
+              }}
+              title="全屏预览"
+            >
+              <Maximize2 size={12} />
+            </button>
+          )}
         </div>
-      </div>
 
-      {/* Action Bar */}
-      <div style={{ display: "flex", gap: 12, fontSize: 12, color: C.muted }}>
-        {hasImage && (
-          <>
+        {/* Action Bar */}
+        <div style={{ display: "flex", gap: 12, fontSize: 12, color: C.muted, alignItems: "center" }}>
+          {hasImage && (
+            <button
+              onClick={() => downloadFile(shot.firstFrameUrl!, `shot-${shot.episodeNumber}-${shot.shotNumber}-frame.jpg`)}
+              style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", background: "none", border: "none", color: C.muted }}
+            >
+              <Download size={12} /> 下载首帧
+            </button>
+          )}
+          {hasVideo && (
+            <button
+              onClick={() => downloadFile(shot.videoUrl!, `shot-${shot.episodeNumber}-${shot.shotNumber}-video.mp4`)}
+              style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", background: "none", border: "none", color: C.amber }}
+            >
+              <Download size={12} /> 下载视频
+            </button>
+          )}
+          {hasImage && (
             <button style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", background: "none", border: "none", color: C.muted }}>
               <RefreshCw size={12} /> 重绘
             </button>
-            <button style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", background: "none", border: "none", color: C.muted }}>
-              <Copy size={12} /> 对口型
-            </button>
-          </>
-        )}
-        {(hasImage || hasVideo) && (
-          <a href={hasVideo ? shot.videoUrl! : shot.firstFrameUrl!} download target="_blank" rel="noreferrer">
-            <button style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", background: "none", border: "none", color: C.muted }}>
-              <Download size={12} /> 下载
-            </button>
-          </a>
-        )}
+          )}
+        </div>
       </div>
-    </div>
+
+      {/* Fullscreen Modal */}
+      {isFullscreen && (
+        <div
+          onClick={() => setIsFullscreen(false)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 9999,
+            background: "oklch(0.05 0.005 240 / 0.95)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <button
+            onClick={() => setIsFullscreen(false)}
+            style={{
+              position: "absolute", top: 20, right: 20,
+              width: 36, height: 36, borderRadius: "50%",
+              background: "oklch(0.2 0.006 240)", border: `1px solid ${C.border}`,
+              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: C.text,
+            }}
+          >
+            <X size={16} />
+          </button>
+          <div
+            onClick={e => e.stopPropagation()}
+            style={{
+              ...(isPortrait
+                ? { height: "90vh", aspectRatio: "9/16" }
+                : { width: "90vw", aspectRatio: "16/9" }
+              ),
+              borderRadius: 12, overflow: "hidden",
+            }}
+          >
+            {hasVideo ? (
+              <video src={shot.videoUrl!} controls autoPlay loop style={{ width: "100%", height: "100%", objectFit: "contain", background: "#000" }} />
+            ) : (
+              <img src={shot.firstFrameUrl!} alt="fullscreen" style={{ width: "100%", height: "100%", objectFit: "contain", background: "#000" }} />
+            )}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
