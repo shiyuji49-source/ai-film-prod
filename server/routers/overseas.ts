@@ -1589,7 +1589,6 @@ Return ONLY the prompt text.`,
       viewType: z.enum(["style", "main", "front", "side", "back", "closeup", "multiangle"]).default("main"),
       imageModel: z.string().optional(),
       customPrompt: z.string().optional(),
-      referenceImageUrl: z.string().optional(),
       resolution: z.string().optional(),
       aspectRatio: z.string().optional(),
     }))
@@ -1621,7 +1620,6 @@ Return ONLY the prompt text.`,
       };
       const basePrompt = input.customPrompt || `${asset.name}, ${asset.description ?? ""}`;
       const prompt = `${basePrompt}, ${viewLabels[input.viewType]}, ${styleKw}, no text, no watermark`;
-      const refUrl = input.referenceImageUrl || asset.mjImageUrl || asset.styleImageUrl;
       // Scenes default to 16:9 landscape regardless of project setting
       const assetAspectRatio = input.aspectRatio || (asset.type === "scene" ? "16:9" : (isPortrait ? "9:16" : "16:9"));
        const chosenModel = input.imageModel || "doubao-seedream-4-5-251128";
@@ -1631,7 +1629,6 @@ Return ONLY the prompt text.`,
         const seedreamResults = await generateSeedreamImage({
           model: chosenModel as any,
           prompt,
-          image: refUrl || undefined,
           size: "2K",
           watermark: false,
         });
@@ -1644,10 +1641,8 @@ Return ONLY the prompt text.`,
         s3Url = url;
       } else if (chosenModel === "midjourney") {
         // Midjourney — 通过 VectorEngine MJ API（正确路径）
-        // 直接传入参考图 URL（而非 base64），避免请求体过大导致 TLS 断开
         const mjImageUrl = await generateMJImageAndWait({
           prompt,
-          referenceImageUrl: refUrl || undefined,
         });
         // 下载 MJ 图片并保存到 S3
         const mjResp = await fetch(mjImageUrl);
@@ -1659,7 +1654,6 @@ Return ONLY the prompt text.`,
         // VectorEngine API（nano-banana-pro / Gemini 3 Pro Image 等）
         s3Url = await generateVEImage({
           prompt,
-          imageUrl: refUrl || undefined,
           aspectRatio: assetAspectRatio,
           s3KeyPrefix: "overseas-assets",
           userId: ctx.user.id,
@@ -1691,8 +1685,6 @@ Return ONLY the prompt text.`,
         and(eq(overseasAssets.id, input.assetId), eq(overseasAssets.userId, ctx.user.id))
       );
       if (!asset) throw new Error("Asset not found");
-      const refUrl = asset.mainImageUrl || asset.mjImageUrl || asset.styleImageUrl;
-      if (!refUrl) throw new Error("请先生成或上传主体图片");
       const [project] = await db!.select().from(overseasProjects).where(
         and(eq(overseasProjects.id, input.projectId), eq(overseasProjects.userId, ctx.user.id))
       );
@@ -1707,11 +1699,10 @@ Return ONLY the prompt text.`,
       const mvAspectRatio = project.aspectRatio === "portrait" ? "9:16" : "16:9";
 
       // Helper: generate via Seedream 5.0 (best for multi-view consistency)
-      const genSeedream5 = async (prompt: string, refImageUrl: string | null, aspectRatio: string, field: string) => {
+      const genSeedream5 = async (prompt: string, aspectRatio: string, field: string) => {
         const seedreamResults = await generateSeedreamImage({
           model: "doubao-seedream-5-0-260128" as any,
           prompt,
-          image: refImageUrl || undefined,
           size: "2K",
           watermark: false,
         });
@@ -1734,7 +1725,7 @@ Return ONLY the prompt text.`,
         ];
         for (const v of views) {
           try {
-            const s3Url = await genSeedream5(v.label, refUrl, mvAspectRatio, v.field);
+            const s3Url = await genSeedream5(v.label, mvAspectRatio, v.field);
             results[v.field] = s3Url;
           } catch (e) { /* skip failed views */ }
         }
@@ -1742,7 +1733,7 @@ Return ONLY the prompt text.`,
         try {
           const sceneDesc = asset.description ? `, ${asset.description}` : "";
           const prompt = `${asset.name}${sceneDesc}, cinematic establishing shot, 16:9 horizontal landscape, ${styleKw}, no people, no characters, no humans, no text, no watermark, empty environment, atmospheric lighting`;
-          const s3Url = await genSeedream5(prompt, refUrl, "16:9", "multiAngleGridUrl");
+          const s3Url = await genSeedream5(prompt, "16:9", "multiAngleGridUrl");
           results.multiAngleGridUrl = s3Url;
         } catch (e) { /* skip */ }
       } else {
@@ -1755,7 +1746,7 @@ Return ONLY the prompt text.`,
         ];
         for (const v of views) {
           try {
-            const s3Url = await genSeedream5(v.label, refUrl, mvAspectRatio, v.field);
+            const s3Url = await genSeedream5(v.label, mvAspectRatio, v.field);
             results[v.field] = s3Url;
           } catch (e) { /* skip */ }
         }
@@ -2194,7 +2185,7 @@ Rules:
       fileName: z.string(),
       contentType: z.string().default("image/jpeg"),
       assetId: z.number().int().optional(),
-      field: z.enum(["mjImageUrl", "mainImageUrl", "styleImageUrl", "viewFrontUrl", "viewSideUrl", "viewBackUrl", "viewCloseUpUrl", "multiAngleGridUrl", "referenceImageUrl"]).default("mjImageUrl"),
+      field: z.enum(["mjImageUrl", "mainImageUrl", "styleImageUrl", "viewFrontUrl", "viewSideUrl", "viewBackUrl", "viewCloseUpUrl", "multiAngleGridUrl"]).default("mjImageUrl"),
     }))
     .mutation(async ({ ctx, input }) => {
       const ext = input.fileName.split(".").pop() || "jpg";
@@ -2205,7 +2196,7 @@ Rules:
   uploadAssetToS3: protectedProcedure
     .input(z.object({
       assetId: z.number().int(),
-      field: z.enum(["mjImageUrl", "mainImageUrl", "styleImageUrl", "viewFrontUrl", "viewSideUrl", "viewBackUrl", "viewCloseUpUrl", "multiAngleGridUrl", "referenceImageUrl"]),
+      field: z.enum(["mjImageUrl", "mainImageUrl", "styleImageUrl", "viewFrontUrl", "viewSideUrl", "viewBackUrl", "viewCloseUpUrl", "multiAngleGridUrl"]),
       fileBase64: z.string(),
       contentType: z.string().default("image/jpeg"),
       fileName: z.string().default("image.jpg"),

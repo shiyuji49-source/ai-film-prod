@@ -155,3 +155,11 @@
 - [x] vectorengine.test.ts 测试模型改为 claude-sonnet-4-6
 - [x] core.test.ts 断言改为 claude-sonnet-4-6
 - [x] 65/65 测试全部通过
+
+## 2026-03-20 移除参考图上传功能
+
+- [ ] 后端 generateAssetImage 移除 referenceImageUrl 参数和相关逻辑
+- [ ] 后端 generateMJImageAndWait 移除 referenceImageUrl/referenceImageBase64 参数
+- [ ] 后端 generateSeedreamImage 调用移除 image 参数
+- [ ] 后端 generateVEImage 调用移除 imageUrl 参数
+- [ ] 前端移除参考图上传 UI 组件

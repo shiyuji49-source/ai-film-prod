@@ -49,7 +49,6 @@ type OverseasAsset = {
   viewBackUrl: string | null;
   viewCloseUpUrl: string | null;
   multiAngleGridUrl: string | null;
-  referenceImageUrl: string | null;
   resolution: string | null;
   aspectRatio: string | null;
   tags: string | null;
@@ -157,11 +156,9 @@ export function SubjectPanel({ asset, project, onClose, onRefresh }: SubjectPane
   const [generating, setGenerating] = useState(false);
   const [generatingMultiView, setGeneratingMultiView] = useState(false);
 
-  const [uploadingRef, setUploadingRef] = useState(false);
   const [resolution, setResolution] = useState(asset.resolution ?? "");
   const defaultAspectRatio = asset.type === "scene" ? "16:9" : (asset.aspectRatio ?? (project.aspectRatio === "portrait" ? "9:16" : "16:9"));
   const [aspectRatio, setAspectRatio] = useState(asset.aspectRatio ?? defaultAspectRatio);
-  const refImageInputRef = useRef<HTMLInputElement>(null);
 
   // History: collect all generated style images (current + previous)
   const styleHistory: string[] = [
@@ -203,10 +200,9 @@ export function SubjectPanel({ asset, project, onClose, onRefresh }: SubjectPane
     onError: (e: { message: string }) => toast.error(e.message),
   });
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, field: "mjImageUrl" | "referenceImageUrl") => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, field: "mjImageUrl") => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setUploadingRef(true);
     const formData = new FormData();
     formData.append("file", file);
     formData.append("assetId", String(asset.id));
@@ -220,7 +216,6 @@ export function SubjectPanel({ asset, project, onClose, onRefresh }: SubjectPane
     } catch {
       toast.error("上传失败");
     } finally {
-      setUploadingRef(false);
       e.target.value = "";
     }
   };
@@ -292,7 +287,6 @@ export function SubjectPanel({ asset, project, onClose, onRefresh }: SubjectPane
             aspectRatio={aspectRatio}
             setAspectRatio={setAspectRatio}
             generating={generating}
-            uploadingRef={uploadingRef}
             onGenerate={() => {
               if (!stylePrompt.trim()) { toast.error("请输入提示词"); return; }
               setGenerating(true);
@@ -310,9 +304,6 @@ export function SubjectPanel({ asset, project, onClose, onRefresh }: SubjectPane
               generateMjPrompt.mutate({ assetId: asset.id, projectId: asset.projectId ?? 0 });
             }}
             autoPromptLoading={generateMjPrompt.isPending}
-            onUploadRef={(e) => handleFileUpload(e, "referenceImageUrl")}
-            refImageInputRef={refImageInputRef}
-            referenceImageUrl={asset.referenceImageUrl}
           />
         )}
 
@@ -335,8 +326,7 @@ export function SubjectPanel({ asset, project, onClose, onRefresh }: SubjectPane
 function StylePanel({
   asset, styleHistory, stylePrompt, setStylePrompt, styleModel, setStyleModel,
   resolution, setResolution, aspectRatio, setAspectRatio,
-  generating, uploadingRef, onGenerate, onAutoPrompt, autoPromptLoading,
-  onUploadRef, refImageInputRef, referenceImageUrl,
+  generating, onGenerate, onAutoPrompt, autoPromptLoading,
 }: {
   asset: OverseasAsset;
   styleHistory: string[];
@@ -349,13 +339,9 @@ function StylePanel({
   aspectRatio: string;
   setAspectRatio: (v: string) => void;
   generating: boolean;
-  uploadingRef: boolean;
   onGenerate: () => void;
   onAutoPrompt: () => void;
   autoPromptLoading: boolean;
-  onUploadRef: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  refImageInputRef: React.RefObject<HTMLInputElement | null>;
-  referenceImageUrl: string | null;
 }) {
   return (
     <>
@@ -369,42 +355,6 @@ function StylePanel({
       {styleHistory.length > 0 && (
         <HistoryPaginator urls={styleHistory} label={`风格参考${styleHistory.length > 1 ? `（共 ${styleHistory.length} 张）` : ""}`} />
       )}
-
-      {/* Reference Image Upload */}
-      <div>
-        <label style={{ fontSize: 10, color: C.muted, marginBottom: 4, display: "block", textTransform: "uppercase", letterSpacing: "0.06em" }}>
-          上传参考图 <span style={{ color: C.mutedDim }}>（可选）</span>
-        </label>
-        {referenceImageUrl ? (
-          <div style={{ position: "relative" }}>
-            <ClickableImage url={referenceImageUrl} alt="ref" height={80} />
-            <button
-              onClick={() => refImageInputRef.current?.click()}
-              style={{
-                position: "absolute", bottom: 4, right: 4, padding: "3px 8px",
-                borderRadius: 4, background: "oklch(0.08 0.005 240 / 0.8)",
-                border: "none", color: C.muted, cursor: "pointer", fontSize: 10,
-                zIndex: 1,
-              }}
-            >
-              更换
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={() => refImageInputRef.current?.click()}
-            style={{
-              width: "100%", height: 60, borderRadius: 8,
-              border: `2px dashed ${C.border}`, background: "transparent",
-              cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-              color: C.muted, fontSize: 11,
-            }}
-          >
-            {uploadingRef ? <Loader2 size={14} className="animate-spin" /> : <><Upload size={14} /> 上传参考图</>}
-          </button>
-        )}
-        <input ref={refImageInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onUploadRef} />
-      </div>
 
       {/* Image Model Selector */}
       <div>

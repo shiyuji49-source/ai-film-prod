@@ -74,7 +74,6 @@ type OverseasAsset = {
   name: string;
   description: string | null;
   stylePrompt: string | null;
-  referenceImageUrl: string | null;
   mjPrompt: string | null;
   nbpPrompt: string | null;
   mjImageUrl: string | null;
