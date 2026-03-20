@@ -1688,37 +1688,58 @@ Return ONLY the prompt text.`,
           results.multiAngleGridUrl = url;
         } catch (e) { /* skip on failure */ }
       } else if (asset.type === "scene") {
-        // 场景：用 MJ 生成 4 张独立 4K 场景图，分别对应不同视角
-        const sceneDesc = asset.description ? `, ${asset.description}` : "";
-        const baseScene = `${asset.name}${sceneDesc}`;
-        const sceneViews = [
-          {
-            field: "viewFrontUrl",
-            prompt: `${baseScene}, wide establishing shot, cinematic 16:9, ${styleKw}, no people, no humans, empty environment, photorealistic, 4K, atmospheric lighting, no text, no watermark --ar 16:9 --style raw --q 2`,
-          },
-          {
-            field: "viewSideUrl",
-            prompt: `${baseScene}, interior medium shot, cinematic 16:9, ${styleKw}, no people, no humans, detailed environment, photorealistic, 4K, warm ambient lighting, no text, no watermark --ar 16:9 --style raw --q 2`,
-          },
-          {
-            field: "viewBackUrl",
-            prompt: `${baseScene}, close-up detail shot, cinematic 16:9, ${styleKw}, no people, no humans, texture and material detail, photorealistic, 4K, dramatic lighting, no text, no watermark --ar 16:9 --style raw --q 2`,
-          },
-          {
-            field: "viewCloseUpUrl",
-            prompt: `${baseScene}, mood atmosphere shot, cinematic 16:9, ${styleKw}, no people, no humans, golden hour or dramatic sky, photorealistic, 4K, cinematic color grading, no text, no watermark --ar 16:9 --style raw --q 2`,
-          },
+        // 场景：用 LLM 根据剧本描述动态生成 4 个不同视角的 MJ prompt，再用 MJ 生成 4 张独立 4K 场景图
+        const sceneDesc = asset.description ?? "";
+        const llmScenePrompt = `你是专业的 AI 影片制作提示词工程师。请根据以下场景信息，生成 4 个用于 Midjourney 7（MJ7）的场景参考图英文提示词。
+【场景信息】
+场景名称：${asset.name}
+场景描述：${sceneDesc || "无"}
+整体风格：${styleKw}
+
+【要求】
+- 根据剧本内容分析该场景的视觉特点，生成 4 个不同拍摄角度的场景图提示词
+- 每个提示词应强调该场景的不同特征：全景建立镜头、内景中景、环境细节特写、氛围光影
+- 所有提示词必须：无人物、无文字、无水印、写实风格、16:9画幅、4K
+- 每个提示词末尾加上：--ar 16:9 --style raw --q 2
+
+请严格输出以下 JSON 格式：
+{
+  "view1": "English MJ prompt for wide establishing shot --ar 16:9 --style raw --q 2",
+  "view2": "English MJ prompt for interior medium shot --ar 16:9 --style raw --q 2",
+  "view3": "English MJ prompt for close-up detail shot --ar 16:9 --style raw --q 2",
+  "view4": "English MJ prompt for mood atmosphere shot --ar 16:9 --style raw --q 2"
+}`;
+        // Step 1: LLM 动态生成 4 个视角的中文 prompt
+        let scenePrompts: { view1: string; view2: string; view3: string; view4: string } | null = null;
+        try {
+          const llmRaw = await callGPT({ messages: [{ role: "user", content: llmScenePrompt }] });
+          scenePrompts = JSON.parse(llmRaw) as { view1: string; view2: string; view3: string; view4: string };
+        } catch { /* 降级为固定模板 */ }
+        const baseScene = `${asset.name}${sceneDesc ? ", " + sceneDesc : ""}`;
+        const sceneViews: Array<{ field: string; prompt: string }> = [
+          { field: "viewFrontUrl", prompt: scenePrompts?.view1 ?? `${baseScene}, wide establishing shot, cinematic 16:9, ${styleKw}, no people, no humans, empty environment, photorealistic, 4K, atmospheric lighting, no text, no watermark` },
+          { field: "viewSideUrl", prompt: scenePrompts?.view2 ?? `${baseScene}, interior medium shot, cinematic 16:9, ${styleKw}, no people, no humans, detailed environment, photorealistic, 4K, warm ambient lighting, no text, no watermark` },
+          { field: "viewBackUrl", prompt: scenePrompts?.view3 ?? `${baseScene}, close-up detail shot, cinematic 16:9, ${styleKw}, no people, no humans, texture and material detail, photorealistic, 4K, dramatic lighting, no text, no watermark` },
+          { field: "viewCloseUpUrl", prompt: scenePrompts?.view4 ?? `${baseScene}, mood atmosphere shot, cinematic 16:9, ${styleKw}, no people, no humans, golden hour or dramatic sky, photorealistic, 4K, cinematic color grading, no text, no watermark` },
         ];
-        for (const v of sceneViews) {
+        // Step 2: 用 Seedream 5.0 并行生成 4 张场景图
+        await Promise.all(sceneViews.map(async (v) => {
           try {
-            const mjUrl = await generateMJImageAndWait({ prompt: v.prompt });
-            const resp = await fetch(mjUrl);
+            const sdResults = await generateSeedreamImage({
+              model: "doubao-seedream-5-0-260128" as any,
+              prompt: v.prompt,
+              size: "2K",
+              watermark: false,
+            });
+            const rawUrl = sdResults[0]?.url;
+            if (!rawUrl) return;
+            const resp = await fetch(rawUrl);
             const buf = Buffer.from(await resp.arrayBuffer());
-            const key = `overseas-assets/${ctx.user.id}/${asset.id}-${v.field}-mj-${nanoid(6)}.jpg`;
+            const key = `overseas-assets/${ctx.user.id}/${asset.id}-${v.field}-sd5-${nanoid(6)}.jpg`;
             const { url } = await storagePut(key, buf, "image/jpeg");
             results[v.field] = url;
           } catch (e) { /* skip failed views */ }
-        }
+        }));
       }
       if (Object.keys(results).length > 0) {
         await db!.update(overseasAssets).set(results).where(eq(overseasAssets.id, asset.id));
