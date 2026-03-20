@@ -30,7 +30,7 @@ describe("VectorEngine API Key validation", () => {
         "Authorization": `Bearer ${key}`,
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
+        model: "gpt-5.4-mini",
         messages: [{ role: "user", content: "Say hello in one word" }],
         max_tokens: 10,
       }),
