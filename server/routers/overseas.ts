@@ -10,7 +10,6 @@ import * as XLSX from "xlsx";
 import {
   createSeedanceVideo, querySeedanceTask,
   createVideo, queryVideoTask,
-  callClaudeSonnet, callClaudeOpus,
   generateNanoBananaImage,
   generateSeedreamImage,
   generateMJImageAndWait,

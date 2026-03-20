@@ -73,7 +73,10 @@ describe("Auth Routes", () => {
 describe("VectorEngine Module", () => {
   it("exports all expected functions", async () => {
     const ve = await import("./lib/vectorengine");
-    expect(ve.callClaude).toBeDefined();
+    expect(ve.callGPT).toBeDefined();
+    expect(ve.callGPTFast).toBeDefined();
+    expect(ve.callGPTPro).toBeDefined();
+    // backward-compat aliases
     expect(ve.callClaudeSonnet).toBeDefined();
     expect(ve.callClaudeOpus).toBeDefined();
     expect(ve.mjImagine).toBeDefined();

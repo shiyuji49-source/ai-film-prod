@@ -122,3 +122,9 @@
 
 - [x] 单集剧本导入（parseScript）完成后自动触发 analyzeScriptFull
 - [x] 主体 Tab 增加「刷新资产」提示横幅（新资产导入后显示，点击刷新后自动消除）
+
+## 2026-03-20 重命名 callClaude 系列函数
+
+- [x] vectorengine.ts: callClaude → callGPT, callClaudeSonnet → callGPTFast, callClaudeOpus → callGPTPro
+- [x] 更新所有调用点（ai.ts 局部封装层、overseas.ts 导入），保留向后兼容别名
+- [x] 全郥 65 个测试通过，TypeScript 零错误

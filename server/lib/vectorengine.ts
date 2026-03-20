@@ -17,9 +17,9 @@ const getApiKey = () => ENV.vectorEngineApiKey;
 
 /** 默认 LLM 模型：gpt-5.4-mini — 适用于所有工作流任务 */
 export const GPT_MINI = "gpt-5.4-mini";
-/** @deprecated 保留向后兼容，实际使用 gpt-5.4-mini */
+/** @deprecated 已重命名为 GPT_MINI */
 export const CLAUDE_OPUS = GPT_MINI;
-/** @deprecated 保留向后兼容，实际使用 gpt-5.4-mini */
+/** @deprecated 已重命名为 GPT_MINI */
 export const CLAUDE_SONNET = GPT_MINI;
 
 export interface ChatMessage {
@@ -35,7 +35,8 @@ export interface ChatCompletionOptions {
   response_format?: { type: string; json_schema?: any };
 }
 
-export async function callClaude(options: ChatCompletionOptions): Promise<string> {
+/** 通过向量引擎调用 GPT-5.4-mini（OpenAI 兼容接口）*/
+export async function callGPT(options: ChatCompletionOptions): Promise<string> {
   const { model = GPT_MINI, messages, max_tokens = 8192, temperature = 0.7, response_format } = options;
   const bodyObj: any = { model, messages, max_tokens, temperature };
   if (response_format) bodyObj.response_format = response_format;
@@ -61,7 +62,7 @@ export async function callClaude(options: ChatCompletionOptions): Promise<string
 
     if (isRateLimit && attempt < MAX_RETRIES - 1) {
       const delay = Math.min(2000 * Math.pow(2, attempt), 10000);
-      console.warn(`[Claude] Rate limited (attempt ${attempt + 1}/${MAX_RETRIES}), retrying in ${delay}ms...`);
+      console.warn(`[GPT] Rate limited (attempt ${attempt + 1}/${MAX_RETRIES}), retrying in ${delay}ms...`);
       await new Promise(resolve => setTimeout(resolve, delay));
       continue;
     }
@@ -70,21 +71,26 @@ export async function callClaude(options: ChatCompletionOptions): Promise<string
       throw new Error("AI 服务请求频率超限，请稍后再试");
     }
 
-    throw new Error(`Claude API error (${res.status}): ${errText}`);
+    throw new Error(`GPT API error (${res.status}): ${errText}`);
   }
 
-  throw new Error("Claude API call failed after max retries");
+  throw new Error("GPT API call failed after max retries");
 }
 
-/** Convenience: call GPT-5.4-mini for simple tasks (formerly Claude Sonnet) */
-export async function callClaudeSonnet(messages: ChatMessage[], options?: Partial<ChatCompletionOptions>): Promise<string> {
-  return callClaude({ model: GPT_MINI, messages, ...options });
+/** 快速任务（剧本解析、结构化提取等）*/
+export async function callGPTFast(messages: ChatMessage[], options?: Partial<ChatCompletionOptions>): Promise<string> {
+  return callGPT({ model: GPT_MINI, messages, ...options });
 }
 
-/** Convenience: call GPT-5.4-mini for complex creative tasks (formerly Claude Opus) */
-export async function callClaudeOpus(messages: ChatMessage[], options?: Partial<ChatCompletionOptions>): Promise<string> {
-  return callClaude({ model: GPT_MINI, messages, ...options });
+/** 复杂创意任务（提示词生成、导演讲戏等）*/
+export async function callGPTPro(messages: ChatMessage[], options?: Partial<ChatCompletionOptions>): Promise<string> {
+  return callGPT({ model: GPT_MINI, messages, ...options });
 }
+
+/** @deprecated 请使用 callGPTFast */
+export const callClaudeSonnet = callGPTFast;
+/** @deprecated 请使用 callGPTPro */
+export const callClaudeOpus = callGPTPro;
 
 // ============================================================
 // Midjourney (via VectorEngine MJ API)
