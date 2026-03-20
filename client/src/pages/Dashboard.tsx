@@ -179,12 +179,6 @@ export default function Dashboard({ onOpenProject }: DashboardProps) {
                 <ImageIcon size={14} /> 资产库
               </Button>
             </Link>
-            <Link href="/api-settings">
-              <Button variant="outline" size="sm"
-                style={{ borderColor: "oklch(0.50 0.15 240 / 0.5)", color: "oklch(0.60 0.12 240)", background: "oklch(0.50 0.15 240 / 0.08)", gap: 6 }}>
-                <Settings size={14} /> AI 设置
-              </Button>
-            </Link>
             <Link href="/overseas">
               <Button variant="outline" size="sm"
                 style={{ borderColor: "oklch(0.65 0.18 145 / 0.5)", color: "oklch(0.65 0.18 145)", background: "oklch(0.65 0.18 145 / 0.08)", gap: 6 }}>

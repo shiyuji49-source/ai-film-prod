@@ -86,3 +86,18 @@
 - [x] 市场默认模型：海外市场（美/英/德/法/西/巴）默认 MJ，中国/日本/韩国/印度默认即梢4.5
 - [x] generateSeedreamImage 修改为直接调用 ARK API（不经过 VectorEngine 代理）
 - [x] 新增 generateMJImageAndWait 辅助函数（提交+轮询+返回 URL）
+
+## 2026-03-20 LLM 统一改为 gpt-5.4-mini
+
+- [x] invokeLLM 默认模型改为 gpt-5.4-mini（server/_core/llm.ts）
+- [x] callClaudeSonnet / callClaudeOpus 改为调用 gpt-5.4-mini（server/lib/vectorengine.ts）
+- [x] 验证所有工作流 LLM 调用均使用 gpt-5.4-mini
+
+## 2026-03-20 删除 API 设置功能
+
+- [x] 删除 server/routers/apiSettings.ts
+- [x] 删除前端 API 设置页面和相关组件
+- [x] 从 server/routers.ts 中移除 apiSettings 路由注册
+- [x] 从 drizzle/schema.ts 中删除 apiSettings 表定义
+- [x] 清理所有引用 apiSettings 的代码（overseas.ts、db.ts、App.tsx、Dashboard.tsx、core.test.ts）
+- [x] 执行 DROP TABLE api_settings SQL

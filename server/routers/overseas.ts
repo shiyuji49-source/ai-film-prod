@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { overseasProjects, scriptShots, videoJobs, overseasAssets, apiSettings } from "../../drizzle/schema";
+import { overseasProjects, scriptShots, videoJobs, overseasAssets } from "../../drizzle/schema";
 import { eq, and, desc, asc, isNull, isNotNull } from "drizzle-orm";
 import { invokeLLM } from "../_core/llm";
 import { storagePut } from "../storage";

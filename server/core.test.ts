@@ -89,10 +89,12 @@ describe("VectorEngine Module", () => {
     expect(ve.queryVideoTask).toBeDefined();
   });
 
-  it("has correct Claude model constants", async () => {
+  it("has correct LLM model constants (all use gpt-5.4-mini)", async () => {
     const ve = await import("./lib/vectorengine");
-    expect(ve.CLAUDE_OPUS).toBe("claude-opus-4-20250514");
-    expect(ve.CLAUDE_SONNET).toBe("claude-sonnet-4-20250514");
+    // All LLM calls now use gpt-5.4-mini via VectorEngine
+    expect(ve.GPT_MINI).toBe("gpt-5.4-mini");
+    expect(ve.CLAUDE_OPUS).toBe("gpt-5.4-mini");
+    expect(ve.CLAUDE_SONNET).toBe("gpt-5.4-mini");
   });
 
   it("IMAGE_MODELS includes Seedream, MJ, and Gemini 3 Pro Image", async () => {
@@ -132,7 +134,6 @@ describe("Router Structure", () => {
     expect(procedures.some(p => p.startsWith("admin."))).toBe(true);
     expect(procedures.some(p => p.startsWith("payment."))).toBe(true);
     expect(procedures.some(p => p.startsWith("assets."))).toBe(true);
-    expect(procedures.some(p => p.startsWith("apiSettings."))).toBe(true);
   });
 
   it("ai router has premium (精品剧) procedures", () => {

@@ -1,10 +1,13 @@
 export const COOKIE_NAME = "app_session_id";
 
-// ── Gemini 模型配置 ──────────────────────────────────────────────────────────
-export const GEMINI_PRO_MODEL = "gemini-3-flash-preview";
-export const GEMINI_FLASH_MODEL = "gemini-3-flash-preview";
+// ── LLM 模型配置 — 所有工作流统一使用 gpt-5.4-mini ──────────────────────────
+export const DEFAULT_LLM_MODEL = "gpt-5.4-mini";
+/** @deprecated 保留向后兼容，实际使用 gpt-5.4-mini */
+export const GEMINI_PRO_MODEL = DEFAULT_LLM_MODEL;
+/** @deprecated 保留向后兼容，实际使用 gpt-5.4-mini */
+export const GEMINI_FLASH_MODEL = DEFAULT_LLM_MODEL;
 
-// thinking_level 配置
+// thinking_level 配置（保留向后兼容）
 export const GEMINI_THINKING_HIGH = "high";
 export const GEMINI_THINKING_LOW  = "low";
 export const GEMINI_THINKING_OFF  = "off";

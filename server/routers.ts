@@ -6,7 +6,6 @@ import { projectsRouter } from "./routers/projects";
 import { adminRouter } from "./routers/admin";
 import { paymentRouter } from "./routers/payment";
 import { assetsRouter } from "./routers/assets";
-import { apiSettingsRouter } from "./routers/apiSettings";
 import { overseasRouter } from "./routers/overseas";
 
 export const appRouter = router({
@@ -17,7 +16,6 @@ export const appRouter = router({
   admin: adminRouter,
   payment: paymentRouter,
   assets: assetsRouter,
-  apiSettings: apiSettingsRouter,
   overseas: overseasRouter,
 });
 

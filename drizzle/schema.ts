@@ -149,25 +149,7 @@ export const assetHistory = mysqlTable("asset_history", {
 export type AssetHistory = typeof assetHistory.$inferSelect;
 export type InsertAssetHistory = typeof assetHistory.$inferInsert;
 
-// ─── API 设置表 ──────────────────────────────────────────────────────────────
-export const apiSettings = mysqlTable("api_settings", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("userId").notNull().unique(),
-  provider: varchar("provider", { length: 32 }).notNull().default("gemini"),
-  model: varchar("model", { length: 128 }).notNull().default("gemini-3-flash-preview"),
-  apiKey: text("apiKey"),
-  apiBaseUrl: text("apiBaseUrl"),
-  falApiKey: text("falApiKey"),
-  lastTestStatus: varchar("lastTestStatus", { length: 16 }).default("untested"),
-  lastTestedAt: timestamp("lastTestedAt"),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
-});
-
-export type ApiSetting = typeof apiSettings.$inferSelect;
-export type InsertApiSetting = typeof apiSettings.$inferInsert;
-
-// ─── 团队成员表 ────────────────────────────────────────────────────────────
+// ─── 团队成员表 ────────────────────────────────────────────────────────────────────────────
 export const teamMembers = mysqlTable("teamMembers", {
   id: int("id").autoincrement().primaryKey(),
   teamId: int("teamId").notNull(),

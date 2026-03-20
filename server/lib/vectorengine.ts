@@ -11,13 +11,16 @@ const getBaseUrl = () => ENV.vectorEngineApiUrl || "https://api.vectorengine.ai"
 const getApiKey = () => ENV.vectorEngineApiKey;
 
 // ============================================================
-// Claude Models (via VectorEngine OpenAI-compatible chat API)
+// LLM Models (via VectorEngine OpenAI-compatible chat API)
+// 所有工作流 LLM 统一使用 gpt-5.4-mini
 // ============================================================
 
-/** Claude Opus 4.6 - for complex creative tasks (storyboard prompts, Seedance prompts) */
-export const CLAUDE_OPUS = "claude-opus-4-20250514";
-/** Claude Sonnet 4.6 - for simpler tasks (script parsing, analysis) */
-export const CLAUDE_SONNET = "claude-sonnet-4-20250514";
+/** 默认 LLM 模型：gpt-5.4-mini — 适用于所有工作流任务 */
+export const GPT_MINI = "gpt-5.4-mini";
+/** @deprecated 保留向后兼容，实际使用 gpt-5.4-mini */
+export const CLAUDE_OPUS = GPT_MINI;
+/** @deprecated 保留向后兼容，实际使用 gpt-5.4-mini */
+export const CLAUDE_SONNET = GPT_MINI;
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -33,7 +36,7 @@ export interface ChatCompletionOptions {
 }
 
 export async function callClaude(options: ChatCompletionOptions): Promise<string> {
-  const { model = CLAUDE_SONNET, messages, max_tokens = 8192, temperature = 0.7, response_format } = options;
+  const { model = GPT_MINI, messages, max_tokens = 8192, temperature = 0.7, response_format } = options;
   const bodyObj: any = { model, messages, max_tokens, temperature };
   if (response_format) bodyObj.response_format = response_format;
 
@@ -73,14 +76,14 @@ export async function callClaude(options: ChatCompletionOptions): Promise<string
   throw new Error("Claude API call failed after max retries");
 }
 
-/** Convenience: call Claude Sonnet for simple tasks */
+/** Convenience: call GPT-5.4-mini for simple tasks (formerly Claude Sonnet) */
 export async function callClaudeSonnet(messages: ChatMessage[], options?: Partial<ChatCompletionOptions>): Promise<string> {
-  return callClaude({ model: CLAUDE_SONNET, messages, ...options });
+  return callClaude({ model: GPT_MINI, messages, ...options });
 }
 
-/** Convenience: call Claude Opus for complex creative tasks */
+/** Convenience: call GPT-5.4-mini for complex creative tasks (formerly Claude Opus) */
 export async function callClaudeOpus(messages: ChatMessage[], options?: Partial<ChatCompletionOptions>): Promise<string> {
-  return callClaude({ model: CLAUDE_OPUS, messages, ...options });
+  return callClaude({ model: GPT_MINI, messages, ...options });
 }
 
 // ============================================================
