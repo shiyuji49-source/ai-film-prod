@@ -529,6 +529,21 @@ function ScriptTab({ projectId, project, activeEpisode, onEpisodeChange }: {
   const [batchInputMode, setBatchInputMode] = useState<"file" | "text">("file");
   const [isDragging, setIsDragging] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // 合并主体解析（批量导入完成后自动触发）
+  const [analyzingAssets, setAnalyzingAssets] = useState(false);
+  const [assetAnalysisResult, setAssetAnalysisResult] = useState<{ addedCount: number; characters: number; scenes: number; props: number } | null>(null);
+  const analyzeScriptFull = trpc.overseas.analyzeScriptFull.useMutation({
+    onSuccess: (data) => {
+      setAnalyzingAssets(false);
+      setAssetAnalysisResult(data);
+      if (data.addedCount > 0) {
+        toast.success(`主体解析完成：新增 ${data.addedCount} 个资产（${data.characters} 角色、${data.scenes} 场景、${data.props} 道具）`);
+      } else {
+        toast.info("主体解析完成，未发现新资产（已全郥存在）");
+      }
+    },
+    onError: (e) => { setAnalyzingAssets(false); toast.error("主体解析失败：" + e.message); },
+  });
 
   const totalEpisodes = project.totalEpisodes ?? 20;
   const { data: shotsData, refetch } = trpc.overseas.listShots.useQuery({ projectId, episodeNumber: activeEpisode });
@@ -622,8 +637,19 @@ function ScriptTab({ projectId, project, activeEpisode, onEpisodeChange }: {
 
   const handleBatchImport = () => {
     if (batchScripts.length === 0) { toast.error("未识别到任何集数，请检查格式"); return; }
+    setAssetAnalysisResult(null);
     setBatchImporting(true);
-    batchParseScripts.mutate({ projectId, scripts: batchScripts });
+    batchParseScripts.mutate(
+      { projectId, scripts: batchScripts },
+      {
+        onSuccess: () => {
+          // 分镜拆解完成后，自动触发主体资产解析
+          const fullScript = batchScripts.map(s => `第${s.episodeNumber}集\n${s.scriptText}`).join("\n\n");
+          setAnalyzingAssets(true);
+          analyzeScriptFull.mutate({ projectId, scriptText: fullScript });
+        },
+      }
+    );
   };
 
   const toggleSelect = (id: number) => {
@@ -962,11 +988,30 @@ function ScriptTab({ projectId, project, activeEpisode, onEpisodeChange }: {
               </div>
             )}
           </div>
+          {/* 主体解析状态显示 */}
+          <div style={{ padding: "10px 0 4px", borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
+            {!batchImporting && !analyzingAssets && !assetAnalysisResult && (
+              <p style={{ fontSize: 11, color: C.muted }}>
+                拆解完成后将自动解析主体资产（人物/场景/道具）并导入主体库
+              </p>
+            )}
+            {analyzingAssets && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: C.blue }}>
+                <Loader2 size={12} className="animate-spin" /> AI 正在解析主体资产...
+              </div>
+            )}
+            {assetAnalysisResult && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: C.green }}>
+                <Check size={12} />
+                主体解析完成：新增 {assetAnalysisResult.addedCount} 个资产（{assetAnalysisResult.characters} 角色、{assetAnalysisResult.scenes} 场景、{assetAnalysisResult.props} 道具）
+              </div>
+            )}
+          </div>
           <DialogFooter style={{ flexShrink: 0 }}>
-            <Button variant="outline" onClick={() => { setShowBatchImport(false); setBatchResults(null); setBatchScripts([]); setUploadedFileName(""); }} style={{ borderColor: C.border, color: C.muted }}>关闭</Button>
+            <Button variant="outline" onClick={() => { setShowBatchImport(false); setBatchResults(null); setBatchScripts([]); setUploadedFileName(""); setAssetAnalysisResult(null); }} style={{ borderColor: C.border, color: C.muted }}>关闭</Button>
             <Button
               onClick={handleBatchImport}
-              disabled={batchScripts.length === 0 || batchImporting}
+              disabled={batchScripts.length === 0 || batchImporting || analyzingAssets}
               style={{ background: C.green, color: "oklch(0.08 0.005 240)", fontWeight: 700, gap: 6 }}
             >
               {batchImporting ? <><Loader2 className="animate-spin w-4 h-4" /> 批量拆解中（{batchScripts.length}集）...</> : <><Wand2 size={14} /> 批量拆解 {batchScripts.length} 集</>}
@@ -1110,22 +1155,7 @@ function SubjectTab({ projectId, project }: { projectId: number; project: Overse
   const [generatingPrompts, setGeneratingPrompts] = useState(false);
   const [promptProgress, setPromptProgress] = useState<{ current: number; total: number } | null>(null);
   const stopGeneratingPromptsRef = useRef(false);
-  // 剧本解析导入对话框
-  const [showScriptAnalyzeDialog, setShowScriptAnalyzeDialog] = useState(false);
-  const [analyzeScriptText, setAnalyzeScriptText] = useState("");
-  const analyzeScriptFull = trpc.overseas.analyzeScriptFull.useMutation({
-    onSuccess: (data) => {
-      if (data.addedCount > 0) {
-        toast.success(`剧本解析完成：新增 ${data.addedCount} 个资产（${data.characters} 角色、${data.scenes} 场景、${data.props} 道具）`);
-      } else {
-        toast.info("未发现新的资产，或所有资产已存在");
-      }
-      setShowScriptAnalyzeDialog(false);
-      setAnalyzeScriptText("");
-      refetchAll();
-    },
-    onError: (e) => toast.error(e.message ?? "剧本解析失败"),
-  });
+  // 剧本解析功能已合并到剧本 Tab 的「批量导入全集」对话框中
   const { data: charAssets, refetch: refetchChar } = trpc.overseas.listAssets.useQuery({ projectId, type: "character" });
   const { data: sceneAssets, refetch: refetchScene } = trpc.overseas.listAssets.useQuery({ projectId, type: "scene" });
   const { data: propAssets, refetch: refetchProp } = trpc.overseas.listAssets.useQuery({ projectId, type: "prop" });
@@ -1174,14 +1204,6 @@ function SubjectTab({ projectId, project }: { projectId: number; project: Overse
             ))}
           </div>
           <div style={{ display: "flex", gap: 6 }}>
-            {/* 剧本解析导入按鈕（精品剧同款） */}
-            <Button
-              onClick={() => setShowScriptAnalyzeDialog(true)}
-              variant="outline"
-              style={{ borderColor: C.blue, color: C.blue, fontWeight: 600, fontSize: 12, gap: 5, height: 32 }}
-            >
-              <FileText size={13} /> 剧本解析导入
-            </Button>
             <Button
               onClick={() => {
                 setDetectingAssets(true);
@@ -1348,44 +1370,6 @@ function SubjectTab({ projectId, project }: { projectId: number; project: Overse
         projectId={projectId}
       />
 
-      {/* 剧本解析导入对话框 */}
-      <Dialog open={showScriptAnalyzeDialog} onOpenChange={setShowScriptAnalyzeDialog}>
-        <DialogContent style={{ background: C.surface, border: `1px solid ${C.border}`, maxWidth: 640 }}>
-          <DialogHeader>
-            <DialogTitle style={{ color: C.text }}>剧本解析导入</DialogTitle>
-          </DialogHeader>
-          <p style={{ fontSize: 12, color: C.muted, marginBottom: 8 }}>
-            粘贴完整剧本（支持多集），AI 将自动识别全局人物、场景、道具，含详细外貌和服装描述。已存在的资产不会重复导入。
-          </p>
-          <Textarea
-            value={analyzeScriptText}
-            onChange={e => setAnalyzeScriptText(e.target.value)}
-            placeholder="粘贴剧本内容（支持多集，最多 80000 字符）..."
-            style={{
-              minHeight: 280, background: C.bg, border: `1px solid ${C.border}`,
-              color: C.text, fontSize: 12, resize: "vertical",
-            }}
-          />
-          <DialogFooter style={{ gap: 8 }}>
-            <Button variant="outline" onClick={() => setShowScriptAnalyzeDialog(false)}
-              style={{ borderColor: C.border, color: C.muted }}>
-              取消
-            </Button>
-            <Button
-              onClick={() => {
-                if (!analyzeScriptText.trim()) { toast.error("请粘贴剧本内容"); return; }
-                analyzeScriptFull.mutate({ projectId, scriptText: analyzeScriptText });
-              }}
-              disabled={analyzeScriptFull.isPending}
-              style={{ background: C.blue, color: "white", fontWeight: 700, gap: 5 }}
-            >
-              {analyzeScriptFull.isPending
-                ? <><Loader2 size={13} className="animate-spin" /> AI 解析中...</>
-                : <><Sparkles size={13} /> 开始解析</>}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
