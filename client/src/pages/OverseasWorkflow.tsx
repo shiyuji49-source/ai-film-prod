@@ -144,6 +144,7 @@ export default function OverseasWorkflow() {
   const [activeProjectId, setActiveProjectId] = useState<number | null>(null);
   const [activeEpisode, setActiveEpisode] = useState(1);
   const [activeTab, setActiveTab] = useState<WorkflowTab>("script");
+  const [pendingAssetRefresh, setPendingAssetRefresh] = useState(false);
 
   if (loading) {
     return (
@@ -388,6 +389,7 @@ function ProjectWorkspace({
 }) {
   const { data } = trpc.overseas.getProject.useQuery({ id: projectId });
   const project = data?.project as OverseasProject | undefined;
+  const [pendingAssetRefresh, setPendingAssetRefresh] = useState(false);
 
   if (!project) {
     return (
@@ -484,12 +486,12 @@ function ProjectWorkspace({
         <AnimatePresence mode="wait">
           {activeTab === "script" && (
             <motion.div key="script" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} style={{ height: "100%" }}>
-              <ScriptTab projectId={projectId} project={project} activeEpisode={activeEpisode} onEpisodeChange={onEpisodeChange} />
+              <ScriptTab projectId={projectId} project={project} activeEpisode={activeEpisode} onEpisodeChange={onEpisodeChange} onAssetsAnalyzed={() => setPendingAssetRefresh(true)} />
             </motion.div>
           )}
           {activeTab === "subject" && (
             <motion.div key="subject" initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }} style={{ height: "100%" }}>
-              <SubjectTab projectId={projectId} project={project} />
+              <SubjectTab projectId={projectId} project={project} hasNewAssets={pendingAssetRefresh} onAssetsRefreshed={() => setPendingAssetRefresh(false)} />
             </motion.div>
           )}
           {activeTab === "storyboard" && (
@@ -507,11 +509,12 @@ function ProjectWorkspace({
 }
 
 // ─── 剧本 Tab ─────────────────────────────────────────────────────────────────
-function ScriptTab({ projectId, project, activeEpisode, onEpisodeChange }: {
+function ScriptTab({ projectId, project, activeEpisode, onEpisodeChange, onAssetsAnalyzed }: {
   projectId: number;
   project: OverseasProject;
   activeEpisode: number;
   onEpisodeChange: (ep: number) => void;
+  onAssetsAnalyzed?: () => void;
 }) {
   const [showScriptInput, setShowScriptInput] = useState(false);
   const [showBatchImport, setShowBatchImport] = useState(false);
@@ -538,6 +541,7 @@ function ScriptTab({ projectId, project, activeEpisode, onEpisodeChange }: {
       setAssetAnalysisResult(data);
       if (data.addedCount > 0) {
         toast.success(`主体解析完成：新增 ${data.addedCount} 个资产（${data.characters} 角色、${data.scenes} 场景、${data.props} 道具）`);
+        onAssetsAnalyzed?.();
       } else {
         toast.info("主体解析完成，未发现新资产（已全郥存在）");
       }
@@ -550,7 +554,20 @@ function ScriptTab({ projectId, project, activeEpisode, onEpisodeChange }: {
   const shots = (shotsData ?? []) as ScriptShot[];
 
   const parseScript = trpc.overseas.parseScript.useMutation({
-    onSuccess: () => { toast.success("分镜拆解完成"); setShowScriptInput(false); setScriptText(""); setGenerating(false); refetch(); },
+    onSuccess: () => {
+      toast.success("分镜拆解完成");
+      setShowScriptInput(false);
+      setGenerating(false);
+      refetch();
+      // 单集导入完成后自动触发主体资产解析
+      const currentScript = scriptText.trim();
+      setScriptText("");
+      if (currentScript) {
+        setAnalyzingAssets(true);
+        setAssetAnalysisResult(null);
+        analyzeScriptFull.mutate({ projectId, scriptText: `第${activeEpisode}集\n${currentScript}` });
+      }
+    },
     onError: (e: { message: string }) => { toast.error(e.message); setGenerating(false); },
   });
 
@@ -804,6 +821,9 @@ function ScriptTab({ projectId, project, activeEpisode, onEpisodeChange }: {
               style={{ background: "oklch(0.18 0.006 240)", border: `1px solid ${C.border}`, color: C.text, resize: "none", fontSize: 13, height: 320, minHeight: 320, maxHeight: 320 }}
             />
             <p style={{ fontSize: 11, color: C.muted, marginTop: 6, flexShrink: 0 }}>字数：{scriptText.length}</p>
+          </div>
+          <div style={{ padding: "6px 0 0", flexShrink: 0 }}>
+            <p style={{ fontSize: 11, color: C.muted }}>拆解完成后将自动解析主体资产（人物/场景/道具）并导入主体库</p>
           </div>
           <DialogFooter style={{ flexShrink: 0 }}>
             <Button variant="outline" onClick={() => setShowScriptInput(false)} style={{ borderColor: C.border, color: C.muted }}>取消</Button>
@@ -1145,8 +1165,8 @@ function ScriptShotCard({ shot, selected, onToggleSelect, onDelete }: {
   );
 }
 
-// ─── 主体 Tab ─────────────────────────────────────────────────────────────────
-function SubjectTab({ projectId, project }: { projectId: number; project: OverseasProject }) {
+// ─── 主体 Tab ─────────────────────────────────────────────────────────────────────────────────
+function SubjectTab({ projectId, project, hasNewAssets, onAssetsRefreshed }: { projectId: number; project: OverseasProject; hasNewAssets?: boolean; onAssetsRefreshed?: () => void }) {
   const [filter, setFilter] = useState<SubjectFilter>("all");
   const [selectedAsset, setSelectedAsset] = useState<OverseasAsset | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
@@ -1177,7 +1197,26 @@ function SubjectTab({ projectId, project }: { projectId: number; project: Overse
   ];
 
   return (
-    <div style={{ display: "flex", height: "calc(100vh - 52px)", overflow: "hidden" }}>
+    <div style={{ display: "flex", height: "calc(100vh - 52px)", overflow: "hidden", flexDirection: "column" }}>
+      {/* 刷新资产提示横幅 */}
+      {hasNewAssets && (
+        <div style={{
+          background: "oklch(0.22 0.04 160)", borderBottom: `1px solid oklch(0.35 0.08 160)`,
+          padding: "8px 20px", display: "flex", alignItems: "center", justifyContent: "space-between",
+          flexShrink: 0,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "oklch(0.85 0.12 160)" }}>
+            <RefreshCw size={14} />
+            剧本导入已自动解析主体资产，点击刷新查看新导入的人物/场景/道具
+          </div>
+          <button
+            onClick={() => { refetchAll(); onAssetsRefreshed?.(); }}
+            style={{ background: "oklch(0.45 0.15 160)", color: "oklch(0.95 0.05 160)", border: "none", borderRadius: 6, padding: "4px 14px", fontSize: 12, cursor: "pointer", fontWeight: 600 }}
+          >
+            刷新资产
+          </button>
+        </div>
+      )}
       {/* Asset Grid */}
       <div style={{ flex: 1, overflow: "hidden", display: "flex", flexDirection: "column" }}>
         {/* Toolbar */}
