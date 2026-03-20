@@ -1644,20 +1644,10 @@ Return ONLY the prompt text.`,
         s3Url = url;
       } else if (chosenModel === "midjourney") {
         // Midjourney — 通过 VectorEngine MJ API（正确路径）
-        // 如果有参考图，转为 base64 传入
-        let refBase64: string | undefined;
-        if (refUrl) {
-          try {
-            const refResp = await fetch(refUrl);
-            const refBuf = Buffer.from(await refResp.arrayBuffer());
-            refBase64 = `data:image/jpeg;base64,${refBuf.toString("base64")}`;
-          } catch {
-            // 参考图获取失败，不影响生成
-          }
-        }
+        // 直接传入参考图 URL（而非 base64），避免请求体过大导致 TLS 断开
         const mjImageUrl = await generateMJImageAndWait({
           prompt,
-          referenceImageBase64: refBase64,
+          referenceImageUrl: refUrl || undefined,
         });
         // 下载 MJ 图片并保存到 S3
         const mjResp = await fetch(mjImageUrl);

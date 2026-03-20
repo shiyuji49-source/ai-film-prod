@@ -177,15 +177,21 @@ export async function mjDescribe(base64: string): Promise<any> {
  */
 export async function generateMJImageAndWait(options: {
   prompt: string;
-  referenceImageBase64?: string;
+  referenceImageUrl?: string;   // 参考图 URL（替代 base64，避免请求体过大导致 TLS 断开）
+  referenceImageBase64?: string; // @deprecated 保留向后兼容，优先使用 referenceImageUrl
   botType?: "MID_JOURNEY" | "NIJI_JOURNEY";
   timeoutMs?: number;
 }): Promise<string> {
-  const { prompt, referenceImageBase64, botType = "MID_JOURNEY", timeoutMs = 300000 } = options;
+  const { prompt, referenceImageUrl, referenceImageBase64, botType = "MID_JOURNEY", timeoutMs = 300000 } = options;
 
   // Step 1: Submit imagine task
-  const base64Array = referenceImageBase64 ? [referenceImageBase64] : [];
-  const submitRes = await mjImagine({ prompt, base64Array, botType });
+  // 优先使用 URL（将图片 URL 附加到 prompt 前面），避免 base64 导致请求体过大
+  let finalPrompt = prompt;
+  if (referenceImageUrl) {
+    finalPrompt = `${referenceImageUrl} ${prompt}`;
+  }
+  const base64Array = (!referenceImageUrl && referenceImageBase64) ? [referenceImageBase64] : [];
+  const submitRes = await mjImagine({ prompt: finalPrompt, base64Array, botType });
   if (!submitRes.result) throw new Error(`MJ submit failed: ${submitRes.description}`);
   const taskId = submitRes.result;
 
