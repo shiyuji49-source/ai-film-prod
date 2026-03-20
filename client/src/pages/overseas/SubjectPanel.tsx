@@ -3,9 +3,8 @@ import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import {
   X, Upload, Loader2, Sparkles, ZoomIn,
-  ImageIcon, Users, MapPin, Package, Maximize2,
-  Palette, Grid3X3, ChevronLeft, ChevronRight,
-  RefreshCw, Shirt,
+  ImageIcon, Users, MapPin, Maximize2,
+  Palette, Grid3X3, ChevronLeft, ChevronRight, RefreshCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -33,7 +32,7 @@ type OverseasAsset = {
   id: number;
   projectId: number;
   userId: number;
-  type: "character" | "scene" | "prop" | "costume";
+  type: "character" | "scene";
   name: string;
   description: string | null;
   stylePrompt: string | null;
@@ -221,11 +220,9 @@ export function SubjectPanel({ asset, project, onClose, onRefresh }: SubjectPane
   };
 
   const typeIcon = asset.type === "character" ? <Users size={16} style={{ color: C.green }} />
-    : asset.type === "scene" ? <MapPin size={16} style={{ color: C.blue }} />
-    : asset.type === "costume" ? <Shirt size={16} style={{ color: C.amber }} />
-    : <Package size={16} style={{ color: C.amber }} />;
+    : <MapPin size={16} style={{ color: C.blue }} />;
 
-  const typeLabel = asset.type === "character" ? "角色" : asset.type === "scene" ? "场景" : asset.type === "prop" ? "道具" : "服装";
+  const typeLabel = asset.type === "character" ? "角色" : "场景";
 
   const hasStyleImage = !!asset.styleImageUrl;
   const hasMultiView = !!(asset.viewFrontUrl || asset.viewSideUrl || asset.viewBackUrl || asset.viewCloseUpUrl || asset.multiAngleGridUrl);
@@ -451,37 +448,25 @@ function MultiViewPanel({
 }) {
   const hasRef = !!(asset.mainImageUrl || asset.mjImageUrl || asset.styleImageUrl);
 
-  if (asset.type === "character") {
-    const viewHistory = [
-      asset.viewCloseUpUrl, asset.viewFrontUrl, asset.viewSideUrl, asset.viewBackUrl,
-    ].filter(Boolean) as string[];
-
+   if (asset.type === "character") {
     return (
       <>
         <div style={{ padding: "8px 10px", borderRadius: 8, background: C.greenDim, border: `1px solid ${C.greenBorder}`, fontSize: 11, color: C.textSub }}>
           <Grid3X3 size={12} style={{ color: C.green, display: "inline", marginRight: 4 }} />
-          角色多视角：近景主视图 + 全身站立三视图（正/侧/背），白色干净背景
+          角色参考设计图：16:9 专业设计图（左 1/3 面部近景 + 右 2/3 三姿态转身），纯白背景，Seedream 5.0
         </div>
-
-        {/* View Grid */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <ViewCard label="近景主视图" url={asset.viewCloseUpUrl} />
-          <ViewCard label="正面全身" url={asset.viewFrontUrl} />
-          <ViewCard label="侧面全身" url={asset.viewSideUrl} />
-          <ViewCard label="背面全身" url={asset.viewBackUrl} />
-        </div>
-
+        {asset.multiAngleGridUrl && (
+          <ClickableImage url={asset.multiAngleGridUrl} alt="角色参考设计图" aspectRatio="16/9" />
+        )}
         <Button
           onClick={onGenerateMultiView}
           disabled={generatingMultiView || !hasRef}
           style={{ background: C.green, color: "oklch(0.08 0.005 240)", fontWeight: 700, gap: 6 }}
         >
           {generatingMultiView ? (
-            <><Loader2 className="animate-spin w-4 h-4" /> 生成中（约1分钟）...</>
-          ) : hasRef ? (
-            <><RefreshCw size={14} /> {viewHistory.length > 0 ? "重新生成多视角" : "一键生成多视角"}</>
+            <><Loader2 className="animate-spin w-4 h-4" /> 生成中（约 30-60 秒）...</>
           ) : (
-            <><Grid3X3 size={14} /> 一键生成多视角</>
+            <><RefreshCw size={14} /> {asset.multiAngleGridUrl ? "重新生成角色设计图" : "生成角色参考设计图（Seedream 5.0）"}</>
           )}
         </Button>
         {!hasRef && (
@@ -496,22 +481,23 @@ function MultiViewPanel({
       <>
         <div style={{ padding: "8px 10px", borderRadius: 8, background: C.greenDim, border: `1px solid ${C.greenBorder}`, fontSize: 11, color: C.textSub }}>
           <Grid3X3 size={12} style={{ color: C.green, display: "inline", marginRight: 4 }} />
-          场景多视角：16:9 横屏，多角度九宫格，无人物，展示不同机位和时间段
+          场景多视角：4 张独立 4K 场景图（建立镜头 / 内景近景 / 细节特写 / 氛围镜头），无人物，MJ 生成
         </div>
-
-        {asset.multiAngleGridUrl && (
-          <ClickableImage url={asset.multiAngleGridUrl} alt="multi-angle" aspectRatio="16/9" />
-        )}
-
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <ViewCard label="建立镜头" url={asset.viewFrontUrl} />
+          <ViewCard label="内景近景" url={asset.viewSideUrl} />
+          <ViewCard label="细节特写" url={asset.viewBackUrl} />
+          <ViewCard label="氛围镜头" url={asset.viewCloseUpUrl} />
+        </div>
         <Button
           onClick={onGenerateMultiView}
           disabled={generatingMultiView || !hasRef}
           style={{ background: C.green, color: "oklch(0.08 0.005 240)", fontWeight: 700, gap: 6 }}
         >
           {generatingMultiView ? (
-            <><Loader2 className="animate-spin w-4 h-4" /> 生成中...</>
+            <><Loader2 className="animate-spin w-4 h-4" /> 生成中（约 4-8 分钟）...</>
           ) : (
-            <><Grid3X3 size={14} /> {asset.multiAngleGridUrl ? "重新生成" : "生成多角度九宫格"}</>
+            <><Grid3X3 size={14} /> {(asset.viewFrontUrl || asset.viewSideUrl) ? "重新生成 4 张场景图" : "生成 4 张场景图（MJ）"}</>
           )}
         </Button>
         {!hasRef && (
@@ -521,36 +507,8 @@ function MultiViewPanel({
     );
   }
 
-  // Prop / Costume
-  return (
-    <>
-      <div style={{ padding: "8px 10px", borderRadius: 8, background: C.greenDim, border: `1px solid ${C.greenBorder}`, fontSize: 11, color: C.textSub }}>
-        <Grid3X3 size={12} style={{ color: C.green, display: "inline", marginRight: 4 }} />
-        {asset.type === "costume" ? "服装三视图：正面/侧面/背面，白色背景" : "道具三视图：正面/侧面/背面产品照，白色背景"}
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-        <ViewCard label="正面" url={asset.viewFrontUrl} />
-        <ViewCard label="侧面" url={asset.viewSideUrl} />
-        <ViewCard label="背面" url={asset.viewBackUrl} />
-      </div>
-
-      <Button
-        onClick={onGenerateMultiView}
-        disabled={generatingMultiView || !hasRef}
-        style={{ background: C.green, color: "oklch(0.08 0.005 240)", fontWeight: 700, gap: 6 }}
-      >
-        {generatingMultiView ? (
-          <><Loader2 className="animate-spin w-4 h-4" /> 生成中...</>
-        ) : (
-          <><Grid3X3 size={14} /> {asset.viewFrontUrl ? "重新生成三视图" : "一键生成三视图"}</>
-        )}
-      </Button>
-      {!hasRef && (
-        <p style={{ fontSize: 10, color: C.amber, textAlign: "center" }}>请先在「风格定调」中生成参考图</p>
-      )}
-    </>
-  );
+  // Fallback
+  return null;
 }
 
 // ─── History Paginator (defined at module level for reuse) ─────────────────────

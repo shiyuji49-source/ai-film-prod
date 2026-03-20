@@ -222,14 +222,14 @@ ${input.scriptText.slice(0, 80000)}
 - 强调金属质感、能量核心、装甲分层
 - 中文提示词：详细描述机甲外观，包含材质、光效、科技感
 - 英文提示词：对应的英文版本，用于直接输入MJ7${styleEnStr}
-- 英文提示词末尾加上：--ar 2:3 --style raw --q 2
+- 英文提示词末尾加上：--ar 9:16 --style raw --q 2
 - 不要出现@符号，不要引用具体作品名称
 ${renderingNote}
 
 请严格输出以下输出格式：
 {
   "zh": "中文提示词内容",
-  "en": "English prompt content --ar 2:3 --style raw --q 2"
+  "en": "English prompt content --ar 9:16 --style raw --q 2"
 }`
         : `你是专业的AI影片制作提示词工程师。请为以下角色生成一张用于 Midjourney 7（MJ7）的竖版单张人物形象参考图提示词。
 
@@ -247,14 +247,14 @@ ${renderingNote}
 - 强调人物气质、服装细节、面部特征
 - 中文提示词：详细描述人物外貌、服装、神态、光线
 - 英文提示词：对应的英文版本，用于直接输入MJ7${styleEnStr}
-- 英文提示词末尾加上：--ar 2:3 --style raw --q 2
+- 英文提示词末尾加上：--ar 9:16 --style raw --q 2
 - 不要出现@符号，不要引用具体作品名称
 ${renderingNote}
 
 请严格输出以下输出格式：
 {
   "zh": "中文提示词内容",
-  "en": "English prompt content --ar 2:3 --style raw --q 2"
+  "en": "English prompt content --ar 9:16 --style raw --q 2"
 }`;
 
       // 如果需要 Q 版形象，同时生成 Q 版提示词
@@ -277,14 +277,14 @@ ${renderingNote}
 - 纯白色背景，工作室光线
 - 中文提示词：详细描述 Q 版形象的大头小身风格、服装、表情
 - 英文提示词：对应的英文版本，用于直接输入MJ7${fixedStyleEn ? `\n- 【固定风格关键词，必须原样嵌入】：${fixedStyleEn}` : ""}
-- 英文提示词末尾加上：--ar 2:3 --style raw --q 2
+- 英文提示词末尾加上：--ar 9:16 --style raw --q 2
 - 不要出现@符号，不要引用具体作品名称
 ${renderingNote}
 
 请严格输出以下输出格式：
 {
   "zh": "中文提示词内容",
-  "en": "English prompt content --ar 2:3 --style raw --q 2"
+  "en": "English prompt content --ar 9:16 --style raw --q 2"
 }`;
         try {
           const qRaw = await callGeminiProCreative(qPrompt);

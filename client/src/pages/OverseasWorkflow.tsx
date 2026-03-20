@@ -12,8 +12,8 @@ import {
   Wand2, ImageIcon, Video, Upload, Edit3, Check, X,
   Loader2, Globe, ArrowLeft, RefreshCw,
   Copy, Download, Play, AlertCircle, Sparkles, Maximize2,
-  Users, MapPin, Package, Zap, MessageSquare, FileText,
-  ChevronLeft, ChevronRight, Settings, FileDown, FileUp, Shirt,
+  Users, MapPin, Zap, MessageSquare, FileText,
+  ChevronLeft, ChevronRight, Settings, FileDown, FileUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -70,7 +70,7 @@ type OverseasAsset = {
   id: number;
   projectId: number;
   userId: number;
-  type: "character" | "scene" | "prop" | "costume";
+  type: "character" | "scene";
   name: string;
   description: string | null;
   stylePrompt: string | null;
@@ -121,7 +121,7 @@ type ScriptShot = {
 };
 
 type WorkflowTab = "script" | "subject" | "storyboard";
-type SubjectFilter = "all" | "character" | "scene" | "prop" | "costume";
+type SubjectFilter = "all" | "character" | "scene";
 type StoryboardPanel = "image" | "video";
 
 // MARKET_OPTIONS is imported from @shared/videoModels
@@ -1022,7 +1022,7 @@ function ScriptTab({ projectId, project, activeEpisode, onEpisodeChange, onAsset
             {assetAnalysisResult && (
               <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: C.green }}>
                 <Check size={12} />
-                主体解析完成：新增 {assetAnalysisResult.addedCount} 个资产（{assetAnalysisResult.characters} 角色、{assetAnalysisResult.scenes} 场景、{assetAnalysisResult.props} 道具）
+                主体解析完成：新增 {assetAnalysisResult.addedCount} 个资产（{assetAnalysisResult.characters} 角色、{assetAnalysisResult.scenes} 场景）
               </div>
             )}
           </div>
@@ -1169,7 +1169,7 @@ function SubjectTab({ projectId, project, hasNewAssets, onAssetsRefreshed }: { p
   const [filter, setFilter] = useState<SubjectFilter>("all");
   const [selectedAsset, setSelectedAsset] = useState<OverseasAsset | null>(null);
   const [showAddDialog, setShowAddDialog] = useState(false);
-  const [addType, setAddType] = useState<"character" | "scene" | "prop" | "costume">("character");
+  const [addType, setAddType] = useState<"character" | "scene">("character");
   const [detectingAssets, setDetectingAssets] = useState(false);
   const [generatingPrompts, setGeneratingPrompts] = useState(false);
   const [promptProgress, setPromptProgress] = useState<{ current: number; total: number } | null>(null);
@@ -1177,22 +1177,18 @@ function SubjectTab({ projectId, project, hasNewAssets, onAssetsRefreshed }: { p
   // 剧本解析功能已合并到剧本 Tab 的「批量导入全集」对话框中
   const { data: charAssets, refetch: refetchChar } = trpc.overseas.listAssets.useQuery({ projectId, type: "character" });
   const { data: sceneAssets, refetch: refetchScene } = trpc.overseas.listAssets.useQuery({ projectId, type: "scene" });
-  const { data: propAssets, refetch: refetchProp } = trpc.overseas.listAssets.useQuery({ projectId, type: "prop" });
-  const { data: costumeAssets, refetch: refetchCostume } = trpc.overseas.listAssets.useQuery({ projectId, type: "costume" });
+
   const allAssets = [
     ...(charAssets ?? []).map(a => ({ ...a, _type: "character" as const })),
     ...(sceneAssets ?? []).map(a => ({ ...a, _type: "scene" as const })),
-    ...(propAssets ?? []).map(a => ({ ...a, _type: "prop" as const })),
-    ...(costumeAssets ?? []).map(a => ({ ...a, _type: "costume" as const })),
-  ] as (OverseasAsset & { _type: "character" | "scene" | "prop" | "costume" })[];
+  ] as (OverseasAsset & { _type: "character" | "scene" })[];
   const filtered = filter === "all" ? allAssets : allAssets.filter(a => a._type === filter);
-  const refetchAll = () => { refetchChar(); refetchScene(); refetchProp(); refetchCostume(); };
+  const refetchAll = () => { refetchChar(); refetchScene(); };
   const FILTER_TABS = [
     { key: "all" as SubjectFilter, label: "全部", icon: <Users size={13} /> },
     { key: "character" as SubjectFilter, label: "角色", icon: <Users size={13} /> },
     { key: "scene" as SubjectFilter, label: "场景", icon: <MapPin size={13} /> },
-    { key: "prop" as SubjectFilter, label: "道具", icon: <Package size={13} /> },
-    { key: "costume" as SubjectFilter, label: "服装", icon: <Shirt size={13} /> },
+
   ];
 
   return (
@@ -1266,7 +1262,7 @@ function SubjectTab({ projectId, project, hasNewAssets, onAssetsRefreshed }: { p
                 }).then((res: any) => {
                   const data = res?.result?.data?.json;
                   if (data?.addedCount > 0) {
-                    toast.success(`AI 识别完成：新增 ${data.addedCount} 个资产（${data.characters} 角色、${data.scenes} 场景、${data.props} 道具、${data.costumes ?? 0} 服装）`);
+                    toast.success(`AI 识别完成：新增 ${data.addedCount} 个资产（${data.characters} 角色、${data.scenes} 场景）`);
                     refetchAll();
                   } else {
                     toast.info("未发现新的资产，或所有资产已存在");
@@ -1419,8 +1415,8 @@ function SubjectCard({ asset, selected, onSelect, onRefresh }: {
   onRefresh: () => void;
 }) {
   const thumbUrl = asset.mainImageUrl || asset.mjImageUrl;
-  const TYPE_LABELS: Record<string, string> = { character: "角色", scene: "场景", prop: "道具", costume: "服装" };
-  const TYPE_COLORS: Record<string, string> = { character: C.green, scene: C.blue, prop: C.amber, costume: C.red };
+  const TYPE_LABELS: Record<string, string> = { character: "角色", scene: "场景" };
+  const TYPE_COLORS: Record<string, string> = { character: C.green, scene: C.blue };
 
   return (
     <div
@@ -1485,7 +1481,7 @@ function SubjectCard({ asset, selected, onSelect, onRefresh }: {
 }
 function AddSubjectDialog({ open, defaultType, onClose, onCreated, projectId }: {
   open: boolean;
-  defaultType: "character" | "scene" | "prop" | "costume";
+  defaultType: "character" | "scene";
   onClose: () => void;
   onCreated: () => void;
   projectId: number;
@@ -1509,12 +1505,11 @@ function AddSubjectDialog({ open, defaultType, onClose, onCreated, projectId }: 
               {[
                 { key: "character", label: "角色", icon: <Users size={13} /> },
                 { key: "scene", label: "场景", icon: <MapPin size={13} /> },
-                { key: "prop", label: "道具", icon: <Package size={13} /> },
-                { key: "costume", label: "服装", icon: <Shirt size={13} /> },
+
               ].map(t => (
                 <button
                   key={t.key}
-                  onClick={() => setForm(f => ({ ...f, type: t.key as "character" | "scene" | "prop" | "costume" }))}
+                  onClick={() => setForm(f => ({ ...f, type: t.key as "character" | "scene" }))}
                   style={{
                     flex: 1, padding: "8px 0", borderRadius: 8, cursor: "pointer",
                     border: `2px solid ${form.type === t.key ? C.green : C.border}`,

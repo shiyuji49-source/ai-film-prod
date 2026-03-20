@@ -1201,7 +1201,7 @@ Return ONLY the prompt text.`,
   listAssets: protectedProcedure
     .input(z.object({
       projectId: z.number().int(),
-      type: z.enum(["character", "scene", "prop", "costume"]).optional(),
+      type: z.enum(["character", "scene"]).optional(),
     }))
     .query(async ({ ctx, input }) => {
       const db = await getDb();
@@ -1216,7 +1216,7 @@ Return ONLY the prompt text.`,
   createAsset: protectedProcedure
     .input(z.object({
       projectId: z.number().int(),
-      type: z.enum(["character", "scene", "prop", "costume"]),
+      type: z.enum(["character", "scene"]),
       name: z.string().min(1).max(255),
       description: z.string().optional(),
       tags: z.string().optional(),
@@ -1360,7 +1360,7 @@ Return ONLY the prompt text.`,
 
       if (asset.type === "character") {
         systemPrompt = `你是专业的影视美术设计师，精通角色设定和 Midjourney 提示词写作。请用叙事描述式风格生成提示词，不要关键词堆叠。输出纯文本英文提示词，可直接用于 Midjourney v7。`;
-        userPrompt = `请为以下角色生成一个完整的 Midjourney v7 英文提示词，用于生成角色设定参考图（左半边面部特写 + 右半边全身三视图，白色背景）。
+             userPrompt = `请为以下角色生成一个完整的 Midjourney v7 英文提示词，用于生成竖版（9:16）单人全身形象参考图。
 
 角色名：${asset.name}
 描述：${asset.description ?? "(无)"}
@@ -1369,13 +1369,14 @@ Return ONLY the prompt text.`,
 要求：
 - 叙事描述式，不要关键词堆叠
 - 包含：年龄感、五官细节（眼型/鼻型/嘴型/肤色）、体型、发型/发色、服装款式/颜色/材质、配饰、整体气质
-- 明确左半边面部特写 + 右半边三视图的布局
-- 白色干净背景，无文字，无水印
+- 单人全身正面站姿，深灰色渐变背景，面部清晰可见，电影感光影
+- 无文字，无水印，无其他人物
 - 风格：${styleKw}
+- 英文提示词末尾加上：--ar 9:16 --style raw --q 2
 - 仅输出英文提示词，不要解释`;
       } else if (asset.type === "scene") {
         systemPrompt = `你是专业的影视美术设计师，精通场景设计和 Midjourney 提示词写作。请用叙事描述式风格生成提示词，不要关键词堆叠。输出纯文本英文提示词，可直接用于 Midjourney v7。`;
-        userPrompt = `请为以下场景生成一个完整的 Midjourney v7 英文提示词，用于生成场景参考图（16:9 横屏，无人物）。
+        userPrompt = `请为以下场景生成一个完整的 Midjourney v7 英文提示词，用于生成场景参考图（16:9 横屏，无人物，4K，真实感）。
 
 场景名：${asset.name}
 描述：${asset.description ?? "(无)"}
@@ -1383,44 +1384,16 @@ Return ONLY the prompt text.`,
 
 要求：
 - 叙事描述式，不要关键词堆叠
-- 包含：视角（建立镜头/俯拍/平视）、空间布局、光源与光线方向、色调、关键道具/家具/物件、氛围情绪
+- 包含：视角（建立镜头/俯拍/平视）、空间布局、光源与光线方向、色调、关键家具/物件、氛围情绪
 - 融合为流畅段落，像描述一个电影画面
-- 无人物，专注于场景本身
-- 16:9 横屏，establishing shot，无文字，无水印
+- 无人物，专注于场景本身，真实感强，非CG风格，photorealistic
+- 16:9 横屏，establishing shot，4K，无文字，无水印
 - 风格：${styleKw}
-- 仅输出英文提示词，不要解释`;
-      } else if (asset.type === "prop") {
-        systemPrompt = `你是专业的影视道具设计师，精通道具设定和 Midjourney 提示词写作。输出纯文本英文提示词，可直接用于 Midjourney v7。`;
-        userPrompt = `请为以下道具生成一个完整的 Midjourney v7 英文提示词，用于生成道具参考图（产品照风格，白色背景）。
-
-道具名：${asset.name}
-描述：${asset.description ?? "(无)"}
-整体风格：${styleZhKw}${scriptContext}
-
-要求：
-- 包含：材质、颜色、尺寸感、细节特征、使用痕迹/磨损感
-- 产品照风格，白色干净背景，居中展示
-- 无文字，无水印
-- 风格：${styleKw}
-- 仅输出英文提示词，不要解释`;
-      } else if (asset.type === "costume") {
-        systemPrompt = `你是专业的影视服装设计师，精通服装设定和 Midjourney 提示词写作。输出纯文本英文提示词，可直接用于 Midjourney v7。`;
-        userPrompt = `请为以下服装生成一个完整的 Midjourney v7 英文提示词，用于生成服装参考图（服装展示，白色背景，无人物）。
-
-服装名：${asset.name}
-描述：${asset.description ?? "(无)"}
-整体风格：${styleZhKw}${scriptContext}
-
-要求：
-- 包含：款式、颜色、材质、剪裁特点、配饰、整体风格感
-- 服装平铺或人台展示，白色背景
-- 无文字，无水印
-- 风格：${styleKw}
+- 英文提示词末尾加上：--ar 16:9 --style raw --q 2
 - 仅输出英文提示词，不要解释`;
       } else {
         throw new Error(`Unsupported asset type: ${asset.type}`);
       }
-
       const res = await callGPT({
         messages: [
           { role: "system", content: systemPrompt },
@@ -1528,34 +1501,6 @@ Return ONLY the prompt text.`,
 - 16:9 横屏，establishing shot，无文字，无水印
 - 风格：${styleKw}
 - 仅输出英文提示词，不要解释`;
-          } else if (asset.type === "prop") {
-            systemPrompt = `你是专业的影视道具设计师，精通道具设定和 Midjourney 提示词写作。输出纯文本英文提示词，可直接用于 Midjourney v7。`;
-            userPrompt = `请为以下道具生成一个完整的 Midjourney v7 英文提示词，用于生成道具参考图（产品照风格，白色背景）。
-
-道具名：${asset.name}
-描述：${asset.description ?? "(无)"}
-整体风格：${styleZhKw}${scriptContext}
-
-要求：
-- 包含：材质、颜色、尺寸感、细节特征、使用痕迹/磨损感
-- 产品照风格，白色干净背景，居中展示
-- 无文字，无水印
-- 风格：${styleKw}
-- 仅输出英文提示词，不要解释`;
-          } else if (asset.type === "costume") {
-            systemPrompt = `你是专业的影视服装设计师，精通服装设定和 Midjourney 提示词写作。输出纯文本英文提示词，可直接用于 Midjourney v7。`;
-            userPrompt = `请为以下服装生成一个完整的 Midjourney v7 英文提示词，用于生成服装参考图（服装展示，白色背景，无人物）。
-
-服装名：${asset.name}
-描述：${asset.description ?? "(无)"}
-整体风格：${styleZhKw}${scriptContext}
-
-要求：
-- 包含：款式、颜色、材质、剪裁特点、配饰、整体风格感
-- 服装平铺或人台展示，白色背景
-- 无文字，无水印
-- 风格：${styleKw}
-- 仅输出英文提示词，不要解释`;
           } else {
             continue;
           }
@@ -1610,19 +1555,26 @@ Return ONLY the prompt text.`,
       const styleKw = styleMap[project.style] ?? "photorealistic";
       const isPortrait = project.aspectRatio === "portrait";
       const viewLabels: Record<string, string> = {
-        style: "artistic style exploration, mood board reference",
-        main: asset.type === "character" ? "full body, front facing, character reference sheet, white background" : (asset.type === "scene" ? "wide 16:9 landscape establishing shot, cinematic, no people, no characters, no humans, empty environment" : "product shot, centered, white background"),
-        front: "front view, full body standing T-pose, white clean background, character turnaround",
-        side: "side profile view, full body standing, white clean background, character turnaround",
-        back: "back view, full body standing, white clean background, character turnaround",
-        closeup: "close-up portrait, face detail, upper body, cinematic lighting",
-        multiangle: "multi-angle view grid, 3x3 grid layout, different camera angles, establishing shots",
+        style: asset.type === "character"
+          ? "single person full body portrait, front facing standing pose, pure white clean background, uniform studio lighting, no shadows, face clearly visible, facial features detailed, costume details prominent, --ar 9:16 --style raw --q 2"
+          : "wide cinematic establishing shot, 16:9 horizontal landscape, photorealistic, 4K, no people, no humans, no characters, empty environment, atmospheric lighting, --ar 16:9 --style raw --q 2",
+        main: asset.type === "character"
+          ? "single person full body front view standing pose, pure white clean background, uniform studio lighting, no shadows, face clearly visible, no text, no watermark, --ar 9:16 --style raw --q 2"
+          : "wide 16:9 landscape establishing shot, cinematic, no people, no characters, no humans, empty environment, photorealistic, 4K, --ar 16:9 --style raw --q 2",
+        front: "full body front view standing pose, pure white background, character design reference, arms slightly away from body, studio lighting, no shadows, --ar 2:3 --style raw --q 2",
+        side: "full body side profile view standing pose, pure white background, character design reference, arms slightly away from body, studio lighting, no shadows, --ar 2:3 --style raw --q 2",
+        back: "full body back view standing pose, pure white background, character design reference, arms slightly away from body, studio lighting, no shadows, --ar 2:3 --style raw --q 2",
+        closeup: "close-up portrait, face and upper body, cinematic lighting, deep gray gradient background, face details prominent, --ar 2:3 --style raw --q 2",
+        multiangle: asset.type === "character"
+          ? "professional character design reference sheet, 16:9 horizontal, pure white background, uniform studio lighting, no shadows, left one-third area close-up face portrait showing facial features and expression details, right two-thirds area three standing poses front view side view back view, arms slightly away from body, character model design style, 4K ultra detailed, --ar 16:9 --style raw --q 2"
+          : "cinematic establishing shot, 16:9, no people, no humans, empty environment, photorealistic, 4K, --ar 16:9 --style raw --q 2",
       };
       const basePrompt = input.customPrompt || `${asset.name}, ${asset.description ?? ""}`;
       const prompt = `${basePrompt}, ${viewLabels[input.viewType]}, ${styleKw}, no text, no watermark`;
-      // Scenes default to 16:9 landscape regardless of project setting
-      const assetAspectRatio = input.aspectRatio || (asset.type === "scene" ? "16:9" : (isPortrait ? "9:16" : "16:9"));
-       const chosenModel = input.imageModel || "doubao-seedream-4-5-251128";
+      // 场景默认 16:9，人物默认 9:16
+      const assetAspectRatio = input.aspectRatio || (asset.type === "scene" ? "16:9" : "9:16");
+      // 场景默认用 MJ（真实感更强），人物默认用 Seedream
+      const chosenModel = input.imageModel || (asset.type === "scene" ? "midjourney" : "doubao-seedream-4-5-251128");
       let s3Url: string;
       if (chosenModel.startsWith("doubao-seedream")) {
         // 火山引擎 ARK API（豆包即梢）— 直接调用，不经过 VectorEngine
@@ -1716,39 +1668,56 @@ Return ONLY the prompt text.`,
       };
 
       if (asset.type === "character") {
+        // 人物：用 Seedream 5.0 生成 1 张 16:9 专业角色参考设计图
+        // 布局：左 1/3 面部近景 + 右 2/3 三姿态转身图（正/侧/背）
         const charDesc = asset.description ? `, ${asset.description}` : "";
-        const views = [
-          { field: "viewCloseUpUrl", label: `close-up portrait of ${asset.name}${charDesc}, face and upper body, cinematic lighting, ${styleKw}, white background, no text, no watermark` },
-          { field: "viewFrontUrl", label: `full body front view of ${asset.name}${charDesc}, T-pose standing, white clean background, character reference sheet, ${styleKw}, no text, no watermark` },
-          { field: "viewSideUrl", label: `full body side profile of ${asset.name}${charDesc}, standing, white clean background, character turnaround, ${styleKw}, no text, no watermark` },
-          { field: "viewBackUrl", label: `full body back view of ${asset.name}${charDesc}, standing, white clean background, character turnaround, ${styleKw}, no text, no watermark` },
-        ];
-        for (const v of views) {
-          try {
-            const s3Url = await genSeedream5(v.label, mvAspectRatio, v.field);
-            results[v.field] = s3Url;
-          } catch (e) { /* skip failed views */ }
-        }
-      } else if (asset.type === "scene") {
+        const charRefPrompt = `${asset.name}${charDesc}, professional character design reference sheet, 16:9 horizontal, pure white background, uniform studio photography lighting, no shadows, left one-third area shows close-up face portrait with clear facial features and expression details, right two-thirds area shows three standing poses: front view standing pose, side view standing pose, back view standing pose, arms slightly away from body, character model design style, ${styleKw}, 4K ultra detailed, no text, no watermark`;
         try {
-          const sceneDesc = asset.description ? `, ${asset.description}` : "";
-          const prompt = `${asset.name}${sceneDesc}, cinematic establishing shot, 16:9 horizontal landscape, ${styleKw}, no people, no characters, no humans, no text, no watermark, empty environment, atmospheric lighting`;
-          const s3Url = await genSeedream5(prompt, "16:9", "multiAngleGridUrl");
-          results.multiAngleGridUrl = s3Url;
-        } catch (e) { /* skip */ }
-      } else {
-        // Prop or costume
-        const propDesc = asset.description ? `, ${asset.description}` : "";
-        const views = [
-          { field: "viewFrontUrl", label: `${asset.name}${propDesc}, front view, product photography, white background, ${styleKw}, no text, no watermark` },
-          { field: "viewSideUrl", label: `${asset.name}${propDesc}, side view, product photography, white background, ${styleKw}, no text, no watermark` },
-          { field: "viewBackUrl", label: `${asset.name}${propDesc}, back view, product photography, white background, ${styleKw}, no text, no watermark` },
+          const seedreamResults = await generateSeedreamImage({
+            model: "doubao-seedream-5-0-260128" as any,
+            prompt: charRefPrompt,
+            size: "2K",
+            watermark: false,
+          });
+          const rawUrl = seedreamResults[0]?.url;
+          if (!rawUrl) throw new Error("Seedream 5.0 returned no URL");
+          const resp = await fetch(rawUrl);
+          const buf = Buffer.from(await resp.arrayBuffer());
+          const key = `overseas-assets/${ctx.user.id}/${asset.id}-multiangle-sd5-${nanoid(6)}.jpg`;
+          const { url } = await storagePut(key, buf, "image/jpeg");
+          results.multiAngleGridUrl = url;
+        } catch (e) { /* skip on failure */ }
+      } else if (asset.type === "scene") {
+        // 场景：用 MJ 生成 4 张独立 4K 场景图，分别对应不同视角
+        const sceneDesc = asset.description ? `, ${asset.description}` : "";
+        const baseScene = `${asset.name}${sceneDesc}`;
+        const sceneViews = [
+          {
+            field: "viewFrontUrl",
+            prompt: `${baseScene}, wide establishing shot, cinematic 16:9, ${styleKw}, no people, no humans, empty environment, photorealistic, 4K, atmospheric lighting, no text, no watermark --ar 16:9 --style raw --q 2`,
+          },
+          {
+            field: "viewSideUrl",
+            prompt: `${baseScene}, interior medium shot, cinematic 16:9, ${styleKw}, no people, no humans, detailed environment, photorealistic, 4K, warm ambient lighting, no text, no watermark --ar 16:9 --style raw --q 2`,
+          },
+          {
+            field: "viewBackUrl",
+            prompt: `${baseScene}, close-up detail shot, cinematic 16:9, ${styleKw}, no people, no humans, texture and material detail, photorealistic, 4K, dramatic lighting, no text, no watermark --ar 16:9 --style raw --q 2`,
+          },
+          {
+            field: "viewCloseUpUrl",
+            prompt: `${baseScene}, mood atmosphere shot, cinematic 16:9, ${styleKw}, no people, no humans, golden hour or dramatic sky, photorealistic, 4K, cinematic color grading, no text, no watermark --ar 16:9 --style raw --q 2`,
+          },
         ];
-        for (const v of views) {
+        for (const v of sceneViews) {
           try {
-            const s3Url = await genSeedream5(v.label, mvAspectRatio, v.field);
-            results[v.field] = s3Url;
-          } catch (e) { /* skip */ }
+            const mjUrl = await generateMJImageAndWait({ prompt: v.prompt });
+            const resp = await fetch(mjUrl);
+            const buf = Buffer.from(await resp.arrayBuffer());
+            const key = `overseas-assets/${ctx.user.id}/${asset.id}-${v.field}-mj-${nanoid(6)}.jpg`;
+            const { url } = await storagePut(key, buf, "image/jpeg");
+            results[v.field] = url;
+          } catch (e) { /* skip failed views */ }
         }
       }
       if (Object.keys(results).length > 0) {
@@ -2061,19 +2030,6 @@ ${scriptText.slice(0, 80000)}
         existingNames.add(scene.name.toLowerCase());
       }
 
-      // 导入道具
-      for (const prop of parsed.props) {
-        if (existingNames.has(prop.name.toLowerCase())) { skipped.push(prop.name); continue; }
-        const description = `${prop.appearance}。材质：${prop.material}。用途：${prop.purpose}`;
-        const [result] = await db!.insert(overseasAssets).values({
-          projectId, userId: ctx.user.id,
-          type: "prop", name: prop.name,
-          description, tags: prop.material,
-        });
-        created.push({ id: (result as any).insertId, name: prop.name, type: "prop" });
-        existingNames.add(prop.name.toLowerCase());
-      }
-
       return {
         episodes: parsed.episodes,
         created,
@@ -2081,7 +2037,7 @@ ${scriptText.slice(0, 80000)}
         addedCount: created.length,
         characters: created.filter(a => a.type === "character").length,
         scenes: created.filter(a => a.type === "scene").length,
-        props: created.filter(a => a.type === "prop").length,
+        props: 0,
       };
     }),
 
@@ -2118,17 +2074,15 @@ ${scriptText.slice(0, 80000)}
             content: `You are a professional film production asset manager. Analyze the script and extract all unique assets (characters, scenes, props) that need to be designed for production.
 
 For each asset, provide:
-- type: "character" | "scene" | "prop" | "costume"
-- name: A concise English name (e.g., "LUCAS", "Abandoned Camp", "Tactical Knife", "Lucas Battle Armor")
+- type: "character" | "scene"
+- name: A concise English name (e.g., "LUCAS", "Abandoned Camp")
 - description: Brief English description of appearance/characteristics
 - tags: comma-separated tags for categorization
 Rules:
 - Characters: Extract ALL named characters with physical descriptions
 - Scenes: Extract ALL unique locations/environments
-- Props: Extract important objects that appear repeatedly or are plot-significant
-- Costumes: Extract distinctive outfits/clothing for main characters
 - Do NOT duplicate entries
-- Names should be in English, concise and clearr`,
+- Names should be in English, concise and clear`,
           },
           {
             role: "user",
@@ -2138,7 +2092,7 @@ Rules:
       });
 
       const content = response;
-      let detectedAssets: Array<{ type: "character" | "scene" | "prop"; name: string; description: string; tags: string }>;
+      let detectedAssets: Array<{ type: "character" | "scene"; name: string; description: string; tags: string }>;
       try {
         const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
         detectedAssets = JSON.parse(cleaned);
@@ -2160,7 +2114,7 @@ Rules:
           continue;
         }
         // 验证 type
-        if (!["character", "scene", "prop", "costume"].includes(asset.type)) continue;
+        if (!["character", "scene"].includes(asset.type)) continue;
         newAssets.push(asset);
         existingNames.add(asset.name.toLowerCase());
       }
