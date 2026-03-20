@@ -55,7 +55,9 @@ export async function callGPT(options: ChatCompletionOptions): Promise<string> {
 
     if (res.ok) {
       const data = await res.json();
-      return data.choices?.[0]?.message?.content ?? "";
+      const raw: string = data.choices?.[0]?.message?.content ?? "";
+      // claude-sonnet 系列有时会将 JSON 包裹在 ```json ... ``` 中，统一在此处剥离
+      return raw.replace(/^```[\w]*\s*\n?/m, "").replace(/\n?```\s*$/m, "").trim();
     }
 
     const errText = await res.text();
