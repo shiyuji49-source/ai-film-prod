@@ -525,6 +525,9 @@ function ScriptTab({ projectId, project, activeEpisode, onEpisodeChange, onAsset
   const [batchScripts, setBatchScripts] = useState<Array<{ episodeNumber: number; scriptText: string }>>([]);
   const [batchImporting, setBatchImporting] = useState(false);
   const [batchResults, setBatchResults] = useState<Array<{ episodeNumber: number; shotCount: number; error?: string }> | null>(null);
+  // 剧本解析异步任务轮询
+  const [parseJobId, setParseJobId] = useState<number | null>(null);
+  const [batchParseJobId, setBatchParseJobId] = useState<number | null>(null);
   // File upload state
   const [uploadingFile, setUploadingFile] = useState(false);
   const [uploadedFileName, setUploadedFileName] = useState("");
@@ -553,33 +556,62 @@ function ScriptTab({ projectId, project, activeEpisode, onEpisodeChange, onAsset
   const shots = (shotsData ?? []) as ScriptShot[];
 
   const parseScript = trpc.overseas.parseScript.useMutation({
-    onSuccess: () => {
-      toast.success("分镜拆解完成");
-      setShowScriptInput(false);
-      setGenerating(false);
-      refetch();
-      // 单集导入完成后自动触发主体资产解析
-      const currentScript = scriptText.trim();
-      setScriptText("");
-      if (currentScript) {
-        setAnalyzingAssets(true);
-        setAssetAnalysisResult(null);
-        analyzeScriptFull.mutate({ projectId, scriptText: `第${activeEpisode}集\n${currentScript}` });
-      }
+    onSuccess: (data) => {
+      toast.info(`第 ${data.episodeNumber} 集拆解中，请稍候...`);
+      setParseJobId(data.jobId);
     },
     onError: (e: { message: string }) => { toast.error(e.message); setGenerating(false); },
   });
 
+  // 轮询单集解析进度
+  const { data: parseJobData } = trpc.overseas.getBatchJob.useQuery(
+    { jobId: parseJobId! },
+    { enabled: parseJobId !== null && generating, refetchInterval: generating ? 3000 : false }
+  );
+  useEffect(() => {
+    if (!parseJobData || !generating) return;
+    if (parseJobData.status === "done") {
+      setGenerating(false);
+      setParseJobId(null);
+      setShowScriptInput(false);
+      refetch();
+      if (parseJobData.failed > 0) {
+        toast.error(`分镜拆解失败：${parseJobData.errorMsg || "未知错误"}`);
+      } else {
+        toast.success("分镜拆解完成");
+        const currentScript = scriptText.trim();
+        setScriptText("");
+        if (currentScript) {
+          setAnalyzingAssets(true);
+          setAssetAnalysisResult(null);
+          analyzeScriptFull.mutate({ projectId, scriptText: `第${activeEpisode}集\n${currentScript}` });
+        }
+      }
+    }
+  }, [parseJobData, generating]);
+
   const batchParseScripts = trpc.overseas.batchParseScripts.useMutation({
     onSuccess: (data) => {
-      setBatchImporting(false);
-      setBatchResults(data.results);
-      const successCount = data.results.filter(r => r.shotCount > 0).length;
-      toast.success(`批量导入完成：${successCount}/${data.totalEpisodes} 集成功`);
-      refetch();
+      toast.info(`批量导入中，共 ${data.totalEpisodes} 集，请稍候...`);
+      setBatchParseJobId(data.jobId);
     },
     onError: (e) => { toast.error(e.message); setBatchImporting(false); },
   });
+
+  // 轮询批量解析进度
+  const { data: batchParseJobData } = trpc.overseas.getBatchJob.useQuery(
+    { jobId: batchParseJobId! },
+    { enabled: batchParseJobId !== null && batchImporting, refetchInterval: batchImporting ? 3000 : false }
+  );
+  useEffect(() => {
+    if (!batchParseJobData || !batchImporting) return;
+    if (batchParseJobData.status === "done") {
+      setBatchImporting(false);
+      setBatchParseJobId(null);
+      toast.success(`批量导入完成：${batchParseJobData.succeeded}/${batchParseJobData.total} 集成功`);
+      refetch();
+    }
+  }, [batchParseJobData, batchImporting]);
 
   const deleteShot = trpc.overseas.deleteShot.useMutation({
     onSuccess: () => { toast.success("已删除"); refetch(); },
@@ -1033,7 +1065,9 @@ function ScriptTab({ projectId, project, activeEpisode, onEpisodeChange, onAsset
               disabled={batchScripts.length === 0 || batchImporting || analyzingAssets}
               style={{ background: C.green, color: "oklch(0.08 0.005 240)", fontWeight: 700, gap: 6 }}
             >
-              {batchImporting ? <><Loader2 className="animate-spin w-4 h-4" /> 批量拆解中（{batchScripts.length}集）...</> : <><Wand2 size={14} /> 批量拆解 {batchScripts.length} 集</>}
+              {batchImporting
+                ? <><Loader2 className="animate-spin w-4 h-4" /> {batchParseJobData && batchParseJobData.total > 0 ? `拆解中 ${batchParseJobData.current}/${batchParseJobData.total} 集...` : `批量拆解中（${batchScripts.length}集）...`}</>
+                : <><Wand2 size={14} /> 批量拆解 {batchScripts.length} 集</>}
             </Button>
           </DialogFooter>
         </DialogContent>

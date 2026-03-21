@@ -399,20 +399,38 @@ export const overseasRouter = router({
       };
     }),
 
-  // ── AI 解析剧本，生成分镜表 ───────────────────────────────────────────────
+  // ── AI 解析剧本，生成分镜表（异步任务模式，立即返回 jobId） ──────────────────
   parseScript: protectedProcedure.input(parseScriptSchema).mutation(async ({ ctx, input }) => {
     const { projectId, episodeNumber, scriptText, language } = input;
 
-    const [project] = await (await getDb())!
+    const db = await getDb();
+    const [project] = await db!
       .select()
       .from(overseasProjects)
       .where(and(eq(overseasProjects.id, projectId), eq(overseasProjects.userId, ctx.user.id)));
     if (!project) throw new Error("Project not found");
 
-    const aspectLabel = project.aspectRatio === "portrait" ? "vertical 9:16" : "horizontal 16:9";
-    const langLabel = language === "en" ? "English" : language === "zh" ? "Chinese" : language;
+    // 创建任务记录，立即返回 jobId
+    const [jobRow] = await db!.insert(batchJobs).values({
+      userId: ctx.user.id,
+      projectId,
+      type: "parseScript",
+      status: "running",
+      total: 1,
+      current: 0,
+      currentName: `第 ${episodeNumber} 集`,
+      succeeded: 0,
+      failed: 0,
+    });
+    const jobId = (jobRow as any).insertId as number;
 
-    const systemPrompt = `You are a professional short drama director and script breakdown specialist.
+    // 后台异步执行
+    setImmediate(async () => {
+      try {
+        const aspectLabel = project.aspectRatio === "portrait" ? "vertical 9:16" : "horizontal 16:9";
+        const langLabel = language === "en" ? "English" : language === "zh" ? "Chinese" : language;
+
+        const systemPrompt = `You are a professional short drama director and script breakdown specialist.
 Your task is to analyze a short drama script and break it down into individual shots for AI video generation.
 
 Rules:
@@ -426,7 +444,7 @@ Rules:
 - NO background music, NO subtitles in visual descriptions
 - Strictly follow the script content, do not add scenes not in the script`;
 
-    const userPrompt = `Analyze this Episode ${episodeNumber} script and generate a shot breakdown:
+        const userPrompt = `Analyze this Episode ${episodeNumber} script and generate a shot breakdown:
 
 ${scriptText}
 
@@ -445,95 +463,78 @@ Return a JSON array of shots with this exact schema:
 
 Important: Return ONLY the JSON array, no markdown, no explanation.`;
 
-    const response = await callGPT({
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userPrompt },
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "shot_breakdown",
-          strict: true,
-          schema: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                shotNumber: { type: "integer" },
-                sceneName: { type: "string" },
-                shotType: { type: "string" },
-                visualDescription: { type: "string" },
-                dialogue: { type: "string" },
-                characters: { type: "string" },
-                emotion: { type: "string" },
+        const response = await callGPT({
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userPrompt },
+          ],
+          response_format: {
+            type: "json_schema",
+            json_schema: {
+              name: "shot_breakdown",
+              strict: true,
+              schema: {
+                type: "array",
+                items: {
+                  type: "object",
+                  properties: {
+                    shotNumber: { type: "integer" },
+                    sceneName: { type: "string" },
+                    shotType: { type: "string" },
+                    visualDescription: { type: "string" },
+                    dialogue: { type: "string" },
+                    characters: { type: "string" },
+                    emotion: { type: "string" },
+                  },
+                  required: ["shotNumber", "sceneName", "shotType", "visualDescription", "dialogue", "characters", "emotion"],
+                  additionalProperties: false,
+                },
               },
-              required: ["shotNumber", "sceneName", "shotType", "visualDescription", "dialogue", "characters", "emotion"],
-              additionalProperties: false,
             },
           },
-        },
-      },
+        });
+
+        let shots: Array<{
+          shotNumber: number; sceneName: string; shotType: string;
+          visualDescription: string; dialogue: string; characters: string; emotion: string;
+        }>;
+        try {
+          shots = JSON.parse(response);
+        } catch {
+          await db!.update(batchJobs).set({ status: "done", failed: 1, errorMsg: "AI 返回格式错误" }).where(eq(batchJobs.id, jobId));
+          return;
+        }
+
+        const dbInst = await getDb();
+        await dbInst!
+          .delete(scriptShots)
+          .where(and(eq(scriptShots.projectId, projectId), eq(scriptShots.userId, ctx.user.id), eq(scriptShots.episodeNumber, episodeNumber)));
+
+        if (shots.length > 0) {
+          await dbInst!.insert(scriptShots).values(
+            shots.map((s) => ({
+              projectId,
+              userId: ctx.user.id,
+              episodeNumber,
+              shotNumber: s.shotNumber,
+              sceneName: s.sceneName,
+              shotType: s.shotType,
+              visualDescription: s.visualDescription,
+              dialogue: s.dialogue,
+              characters: s.characters,
+              emotion: s.emotion,
+              status: "draft" as const,
+            }))
+          );
+        }
+
+        await db!.update(batchJobs).set({ status: "done", current: 1, succeeded: 1 }).where(eq(batchJobs.id, jobId));
+      } catch (err) {
+        await db!.update(batchJobs).set({ status: "done", failed: 1, errorMsg: (err as Error).message }).where(eq(batchJobs.id, jobId));
+      }
     });
 
-    const content = response;
-    let shots: Array<{
-      shotNumber: number;
-      sceneName: string;
-      shotType: string;
-      visualDescription: string;
-      dialogue: string;
-      characters: string;
-      emotion: string;
-    }>;
-
-    try {
-      shots = JSON.parse(content);
-    } catch {
-      throw new Error("Failed to parse AI response as JSON");
-    }
-
-    await (await getDb())!
-      .delete(scriptShots)
-      .where(
-        and(
-          eq(scriptShots.projectId, projectId),
-          eq(scriptShots.userId, ctx.user.id),
-          eq(scriptShots.episodeNumber, episodeNumber)
-        )
-      );
-
-    if (shots.length > 0) {
-      await (await getDb())!.insert(scriptShots).values(
-        shots.map((s) => ({
-          projectId,
-          userId: ctx.user.id,
-          episodeNumber,
-          shotNumber: s.shotNumber,
-          sceneName: s.sceneName,
-          shotType: s.shotType,
-          visualDescription: s.visualDescription,
-          dialogue: s.dialogue,
-          characters: s.characters,
-          emotion: s.emotion,
-          status: "draft" as const,
-        }))
-      );
-    }
-
-    const insertedShots = await (await getDb())!
-      .select()
-      .from(scriptShots)
-      .where(
-        and(
-          eq(scriptShots.projectId, projectId),
-          eq(scriptShots.userId, ctx.user.id),
-          eq(scriptShots.episodeNumber, episodeNumber)
-        )
-      )
-      .orderBy(scriptShots.shotNumber);
-
-    return { shots: insertedShots, count: insertedShots.length };
+    return { jobId, episodeNumber };
   }),
 
   // ── 生成首帧或尾帧图片（支持 Seedream 4.5/5.0 + VE Gemini 3 Pro Image） ──────────────
@@ -1747,7 +1748,7 @@ Return ONLY the prompt text.`,
       return { generated: Object.keys(results), results };
     }),
 
-  // ── 批量导入多集剧本 ─────────────────────────────────────────────────────
+  // ── 批量导入多集剧本（异步任务模式，立即返回 jobId） ────────────────────────
   batchParseScripts: protectedProcedure
     .input(z.object({
       projectId: z.number().int(),
@@ -1759,19 +1760,38 @@ Return ONLY the prompt text.`,
     }))
     .mutation(async ({ ctx, input }) => {
       const { projectId, scripts, language } = input;
-      const [project] = await (await getDb())!
+      const db = await getDb();
+      const [project] = await db!
         .select().from(overseasProjects)
         .where(and(eq(overseasProjects.id, projectId), eq(overseasProjects.userId, ctx.user.id)));
       if (!project) throw new Error("Project not found");
 
-      const results: Array<{ episodeNumber: number; shotCount: number; error?: string }> = [];
+      // 创建任务记录，立即返回 jobId
+      const [jobRow] = await db!.insert(batchJobs).values({
+        userId: ctx.user.id,
+        projectId,
+        type: "batchParseScripts",
+        status: "running",
+        total: scripts.length,
+        current: 0,
+        currentName: `第 ${scripts[0].episodeNumber} 集`,
+        succeeded: 0,
+        failed: 0,
+      });
+      const jobId = (jobRow as any).insertId as number;
 
-      for (const ep of scripts) {
-        try {
-          const aspectLabel = project.aspectRatio === "portrait" ? "vertical 9:16" : "horizontal 16:9";
-          const langLabel = language === "en" ? "English" : language === "zh" ? "Chinese" : language;
+      // 后台异步执行
+      setImmediate(async () => {
+        let succeeded = 0;
+        let failed = 0;
+        for (let i = 0; i < scripts.length; i++) {
+          const ep = scripts[i];
+          await db!.update(batchJobs).set({ current: i, currentName: `第 ${ep.episodeNumber} 集` }).where(eq(batchJobs.id, jobId));
+          try {
+            const aspectLabel = project.aspectRatio === "portrait" ? "vertical 9:16" : "horizontal 16:9";
+            const langLabel = language === "en" ? "English" : language === "zh" ? "Chinese" : language;
 
-          const systemPrompt = `You are a professional short drama director and script breakdown specialist.
+            const systemPrompt = `You are a professional short drama director and script breakdown specialist.
 Your task is to analyze a short drama script and break it down into individual shots for AI video generation.
 
 Rules:
@@ -1785,7 +1805,7 @@ Rules:
 - NO background music, NO subtitles in visual descriptions
 - Strictly follow the script content`;
 
-          const userPrompt = `Analyze this Episode ${ep.episodeNumber} script and generate a shot breakdown:
+            const userPrompt = `Analyze this Episode ${ep.episodeNumber} script and generate a shot breakdown:
 
 ${ep.scriptText}
 
@@ -1804,54 +1824,53 @@ Return a JSON array of shots with this exact schema:
 
 Return ONLY the JSON array.`;
 
-          const response = await callGPT({
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: userPrompt },
-            ],
-          });
+            const response = await callGPT({
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userPrompt },
+              ],
+            });
 
-          const content = response;
-          let shots: Array<{
-            shotNumber: number; sceneName: string; shotType: string;
-            visualDescription: string; dialogue: string; characters: string; emotion: string;
-          }>;
+            let shots: Array<{
+              shotNumber: number; sceneName: string; shotType: string;
+              visualDescription: string; dialogue: string; characters: string; emotion: string;
+            }>;
+            try {
+              const cleaned = response.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+              shots = JSON.parse(cleaned);
+            } catch {
+              failed++;
+              continue;
+            }
 
-          try {
-            const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-            shots = JSON.parse(cleaned);
-          } catch {
-            results.push({ episodeNumber: ep.episodeNumber, shotCount: 0, error: "AI 返回格式错误" });
-            continue;
-          }
-
-          // 删除旧分镜
-          await (await getDb())!.delete(scriptShots).where(
-            and(eq(scriptShots.projectId, projectId), eq(scriptShots.userId, ctx.user.id), eq(scriptShots.episodeNumber, ep.episodeNumber))
-          );
-
-          if (shots.length > 0) {
-            await (await getDb())!.insert(scriptShots).values(
-              shots.map(s => ({
-                projectId, userId: ctx.user.id, episodeNumber: ep.episodeNumber,
-                shotNumber: s.shotNumber, sceneName: s.sceneName, shotType: s.shotType,
-                visualDescription: s.visualDescription, dialogue: s.dialogue,
-                characters: s.characters, emotion: s.emotion, status: "draft" as const,
-              }))
+            const dbInst = await getDb();
+            await dbInst!.delete(scriptShots).where(
+              and(eq(scriptShots.projectId, projectId), eq(scriptShots.userId, ctx.user.id), eq(scriptShots.episodeNumber, ep.episodeNumber))
             );
+
+            if (shots.length > 0) {
+              await dbInst!.insert(scriptShots).values(
+                shots.map(s => ({
+                  projectId, userId: ctx.user.id, episodeNumber: ep.episodeNumber,
+                  shotNumber: s.shotNumber, sceneName: s.sceneName, shotType: s.shotType,
+                  visualDescription: s.visualDescription, dialogue: s.dialogue,
+                  characters: s.characters, emotion: s.emotion, status: "draft" as const,
+                }))
+              );
+            }
+            succeeded++;
+          } catch {
+            failed++;
           }
-
-          results.push({ episodeNumber: ep.episodeNumber, shotCount: shots.length });
-        } catch (err) {
-          results.push({ episodeNumber: ep.episodeNumber, shotCount: 0, error: (err as Error).message });
+          // 集间间隔，避免限流
+          if (i < scripts.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1500));
+          }
         }
-        // 集间加入间隔，避免连续请求触发限流（最后一集不需要等待）
-        if (ep !== scripts[scripts.length - 1]) {
-          await new Promise(resolve => setTimeout(resolve, 1500));
-        }
-      }
+        await db!.update(batchJobs).set({ status: "done", current: scripts.length, succeeded, failed }).where(eq(batchJobs.id, jobId));
+      });
 
-      return { results, totalEpisodes: scripts.length };
+      return { jobId, totalEpisodes: scripts.length };
     }),
 
   // ── 深度剧本解析（真人剧，克隆精品剧 analyzeScript，去除机甲/Q版） ──────────
