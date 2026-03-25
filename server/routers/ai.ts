@@ -1,9 +1,12 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import * as db from "../db";
-import { publicProcedure, router } from "../_core/trpc";
+import { getDb } from "../db";
+import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
 import { ENV } from "../_core/env";
 import { callGPTFast, callGPTPro, GPT_MINI } from "../lib/vectorengine";
+import { batchJobs } from "../../drizzle/schema";
+import { eq, and } from "drizzle-orm";
 import {
   GEMINI_PRO_MODEL,
   GEMINI_FLASH_MODEL,
@@ -444,8 +447,8 @@ ${renderingNote}
       return parsed;
     }),
 
-  // 4. AI 分镜生成 ------------------------------------------------------
-  generateShots: publicProcedure
+  // 4. AI 分镜生成（异步任务模式，立即返回 jobId，后台执行）--------------------
+  generateShots: protectedProcedure
     .input(z.object({
       episodeTitle: z.string(),
       episodeNumber: z.number(),
@@ -468,12 +471,25 @@ ${renderingNote}
       const creditCost = Math.min(refShots, 60);
 
       // 登录用户按参考镜头数扣积分
-      if (ctx.user) {
-        if (ctx.user.credits < creditCost) {
-          throw new TRPCError({ code: "FORBIDDEN", message: `积分不足，生成分镜需要约 ${creditCost} 积分（当前 ${ctx.user.credits}）` });
-        }
-        await db.deductCredits(ctx.user.id, creditCost, "generate_shot", undefined, `AI 生成分镜（约${refShots}个）`);
+      if (ctx.user.credits < creditCost) {
+        throw new TRPCError({ code: "FORBIDDEN", message: `积分不足，生成分镜需要约 ${creditCost} 积分（当前 ${ctx.user.credits}）` });
       }
+      await db.deductCredits(ctx.user.id, creditCost, "generate_shot", undefined, `AI 生成分镜（约${refShots}个）`);
+
+      // 创建异步任务记录，立即返回 jobId
+      const dbInst = await getDb();
+      const [jobRow] = await dbInst!.insert(batchJobs).values({
+        userId: ctx.user.id,
+        projectId: 0, // 精品剧不使用 projectId
+        type: "generateShots",
+        status: "running",
+        total: 1,
+        current: 0,
+        currentName: `第 ${input.episodeNumber} 集`,
+        succeeded: 0,
+        failed: 0,
+      });
+      const jobId = (jobRow as any).insertId as number;
 
       const { episodeTitle, episodeNumber, episodeSynopsis, durationMinutes, scenes, characters, styleZh, styleEn, orientation, market, episodeScript } = input;
 
@@ -562,16 +578,36 @@ ${renderingNote}
   ]
 }`;
 
-      const raw = await callGeminiPro(prompt, 65536);
-      const cleaned = raw.replace(/^```json\s*/m, "").replace(/^```\s*/m, "").replace(/```\s*$/m, "").trim();
-      const parsed = JSON.parse(cleaned) as {
-        shots: Array<{
-          number: number; type: string; size: string; movement: string;
-          description: string; vo: string; dialogue: string; sfx: string;
-          duration: number; emotion: string; emotionLevel: number;
-        }>;
-      };
-      return parsed;
+      // 后台异步执行 LLM 调用（避免 HTTP 超时）
+      setImmediate(async () => {
+        try {
+          const raw = await callGeminiPro(prompt, 65536);
+          const cleaned = raw.replace(/^```json\s*/m, "").replace(/^```\s*/m, "").replace(/```\s*$/m, "").trim();
+          const parsed = JSON.parse(cleaned) as {
+            shots: Array<{
+              number: number; type: string; size: string; movement: string;
+              description: string; vo: string; dialogue: string; sfx: string;
+              duration: number; emotion: string; emotionLevel: number;
+            }>;
+          };
+          const dbInst2 = await getDb();
+          await dbInst2!.update(batchJobs).set({
+            status: "done",
+            current: 1,
+            succeeded: 1,
+            resultData: JSON.stringify(parsed),
+          }).where(eq(batchJobs.id, jobId));
+        } catch (err) {
+          const dbInst2 = await getDb();
+          await dbInst2!.update(batchJobs).set({
+            status: "done",
+            failed: 1,
+            errorMsg: (err as Error).message,
+          }).where(eq(batchJobs.id, jobId));
+        }
+      });
+
+      return { jobId };
     }),
 
   // 5. Seedance 多镜头提示词生成 -------------------------------------------
@@ -1034,5 +1070,16 @@ ${plotPointsDesc}
     .mutation(async () => {
       const result = await callGemini(JSON.stringify({ test: true }) + '\n请回复：{"status":"ok"}');
       return { ok: true, raw: result };
+    }),
+
+  // 7. 查询异步任务状态（用于轮询 generateShots 进度）-----------------------
+  getBatchJob: protectedProcedure
+    .input(z.object({ jobId: z.number().int() }))
+    .query(async ({ ctx, input }) => {
+      const dbInst = await getDb();
+      const [job] = await dbInst!.select().from(batchJobs)
+        .where(and(eq(batchJobs.id, input.jobId), eq(batchJobs.userId, ctx.user.id)));
+      if (!job) throw new TRPCError({ code: "NOT_FOUND", message: "Job not found" });
+      return job;
     }),
 });

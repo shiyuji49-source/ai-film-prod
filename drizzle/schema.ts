@@ -279,7 +279,7 @@ export type InsertOverseasAsset = typeof overseasAssets.$inferInsert;
 export const batchJobs = mysqlTable("batchJobs", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
-  projectId: int("projectId").notNull(),
+  projectId: int("projectId").default(0).notNull(),
   type: varchar("type", { length: 64 }).notNull(), // "generateAllImages"
   status: varchar("status", { length: 32 }).notNull().default("running"), // "running" | "done" | "error"
   total: int("total").default(0).notNull(),
@@ -288,6 +288,7 @@ export const batchJobs = mysqlTable("batchJobs", {
   succeeded: int("succeeded").default(0).notNull(),
   failed: int("failed").default(0).notNull(),
   errorMsg: text("errorMsg"),
+  resultData: text("resultData"), // JSON 存储任务结果（如分镜数组）
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
 });

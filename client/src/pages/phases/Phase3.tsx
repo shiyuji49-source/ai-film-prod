@@ -269,6 +269,35 @@ export default function Phase3() {
 
   const generateShotsMutation = trpc.ai.generateShots.useMutation();
   const phase3Utils = trpc.useUtils();
+  const [shotJobId, setShotJobId] = useState<number | null>(null);
+  const [pollingEpId, setPollingEpId] = useState<string | null>(null);
+
+  // 轮询分镜生成进度
+  const { data: shotJobData } = trpc.ai.getBatchJob.useQuery(
+    { jobId: shotJobId! },
+    { enabled: shotJobId !== null, refetchInterval: shotJobId !== null ? 3000 : false }
+  );
+  useEffect(() => {
+    if (!shotJobData || !pollingEpId) return;
+    if (shotJobData.status === "done") {
+      const epId = pollingEpId;
+      setShotJobId(null);
+      setPollingEpId(null);
+      setGeneratingEp(null);
+      if (shotJobData.failed > 0) {
+        toast.error(`AI 分镜生成失败：${shotJobData.errorMsg || "未知错误"}`);
+      } else if (shotJobData.resultData) {
+        try {
+          const parsed = JSON.parse(shotJobData.resultData) as { shots: Array<{ number: number; type: string; size: string; movement: string; description: string; vo: string; dialogue: string; sfx: string; duration: number; emotion: string; emotionLevel: number; }> };
+          addShotsFromAI(epId, parsed.shots);
+          toast.success(`已生成 ${parsed.shots.length} 个分镜`);
+          phase3Utils.auth.me.invalidate();
+        } catch {
+          toast.error("分镜数据解析失败");
+        }
+      }
+    }
+  }, [shotJobData, pollingEpId]);
 
   const episodes = scriptAnalysis.episodes;
   const activeEp = episodes.find(e => e.id === activeEpTab);
@@ -315,6 +344,7 @@ export default function Phase3() {
   const handleAutoGenerate = async () => {
     if (!activeEpTab || !activeEp) { toast.error("请先选择集数"); return; }
     setGeneratingEp(activeEpTab);
+    setPollingEpId(activeEpTab);
     try {
       // 提取当集原剧本文本，确保 AI 严格遵循原剧本内容
       const episodeScript = extractEpisodeScript(scriptText, activeEp.number, scriptAnalysis.episodes);
@@ -331,19 +361,18 @@ export default function Phase3() {
         market: projectInfo.market || undefined,
         episodeScript: episodeScript || undefined,
       });
-      addShotsFromAI(activeEpTab, result.shots);
-      toast.success(`已为「${activeEp.title}」生成 ${result.shots.length} 个分镜`);
-      // 刷新积分余额
-      phase3Utils.auth.me.invalidate();
+      // 后台异步任务已开始，开始轮询进度
+      setShotJobId(result.jobId);
+      toast.info("分镜生成中，请稍候...");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "未知错误";
+      setGeneratingEp(null);
+      setPollingEpId(null);
       if (msg.includes("积分不足")) {
         toast.error(msg);
       } else {
         toast.error(`AI 分镜生成失败：${msg}`);
       }
-    } finally {
-      setGeneratingEp(null);
     }
   };
 
