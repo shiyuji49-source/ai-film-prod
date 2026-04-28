@@ -17,10 +17,56 @@ export interface VideoModelDef {
   caps: VideoModelCaps;
 }
 
-/** 视频生成只保留 Seedance 1.5 Pro（火山引擎） */
+/** 旧版视频模型列表，保留给历史页面读取。新精品剧默认 Seedance 2.0。 */
 export const VIDEO_MODELS: VideoModelDef[] = [
   { id: "seedance_1_5", name: "Seedance 1.5 Pro", provider: "豆包", caps: { firstFrame: true, lastFrame: true, subjectRef: false } },
+  { id: "seedance_2_0", name: "Seedance 2.0", provider: "豆包", caps: { firstFrame: false, lastFrame: false, subjectRef: true } },
 ];
+
+// ─── 新版视频引擎配置（双线路工作流）────────────────────────────────────────
+
+export type VideoWorkflow = "premium" | "batch" | "both";
+export type VideoMode = "text-to-video" | "first-last-frame" | "image-to-video";
+
+export interface VideoEngineDef {
+  label: string;
+  /** 生成模式 */
+  mode: VideoMode;
+  /** 适用工作流 */
+  workflow: VideoWorkflow;
+  /** 是否为默认引擎 */
+  isDefault?: boolean;
+}
+
+/**
+ * 视频引擎配置（按工作流类型分组）
+ *
+ * 精品剧：seedance-2.0（多参考文生视频，不需要首尾帧）
+ * 跑量剧：seedance-1.5-pro（首尾帧图生视频）
+ * 通用：kling-3.0, veo-3.1（两条路线均可用）
+ */
+export const VIDEO_ENGINES: Record<string, VideoEngineDef> = {
+  // 精品剧专用
+  "seedance-2.0":     { label: "Seedance 2.0（多参考文生视频）", mode: "text-to-video",       workflow: "premium", isDefault: true },
+  // 跑量剧专用
+  "seedance-1.5-pro": { label: "Seedance 1.5 Pro（首尾帧图生视频）", mode: "first-last-frame", workflow: "batch", isDefault: true },
+  // 通用引擎
+  "kling-3.0":        { label: "Kling 3.0",       mode: "image-to-video", workflow: "both" },
+  "kling-3.0-omni":   { label: "Kling 3.0 Omni",  mode: "image-to-video", workflow: "both" },
+  "veo-3.1":          { label: "Veo 3.1 4K",       mode: "image-to-video", workflow: "both" },
+  "runway-gen4":      { label: "Runway Gen-4",      mode: "image-to-video", workflow: "both" },
+  "hailuo-2.3":       { label: "Hailuo 2.3",        mode: "image-to-video", workflow: "both" },
+  "grok-video-3":     { label: "Grok Video 3",      mode: "image-to-video", workflow: "both" },
+  "sora-2-pro":       { label: "Sora 2 Pro",        mode: "image-to-video", workflow: "both" },
+  "wan2.6":           { label: "Wan 2.6 I2V",       mode: "image-to-video", workflow: "both" },
+} as const;
+
+/** 获取指定工作流可用的引擎列表 */
+export function getEnginesForWorkflow(workflow: VideoWorkflow): Array<[string, VideoEngineDef]> {
+  return Object.entries(VIDEO_ENGINES).filter(
+    ([, def]) => def.workflow === workflow || def.workflow === "both"
+  );
+}
 
 export function getVideoModelCaps(modelId: string): VideoModelCaps {
   const m = VIDEO_MODELS.find(v => v.id === modelId);
@@ -54,6 +100,7 @@ export const IMAGE_MODELS: ImageModelDef[] = [
   { id: "doubao-seedream-5-0-260128", name: "即梦 5.0", provider: "豆包", usage: "finalize", api: "volcano" },
   { id: "midjourney", name: "Midjourney", provider: "MJ", usage: "style", api: "vectorengine" },
   { id: "nano-banana-pro", name: "Gemini 3 Pro Image", provider: "Google", usage: "both", api: "vectorengine" },
+  { id: "image2", name: "Image2 简笔草图", provider: "内置", usage: "both", api: "vectorengine" },
 ];
 
 /** 多视角专用模型：即梦 5.0（火山引擎） */

@@ -228,7 +228,7 @@ export default function Home() {
                 <span className="text-xl font-medium" style={{ color: GOLD }}>AI 影片工作流工具</span>
               </h1>
               <p className="text-sm max-w-md" style={{ color: "oklch(0.70 0.008 240)" }}>
-                MJ → Gemini 3 Pro Image → 即梦 Seedance 1.5 Pro · 六阶段全流程引导
+                项目定义 → 分镜草图 → 机位示意图 → Seedance 2.0 多参考生成
               </p>
             </div>
           </div>
@@ -258,7 +258,7 @@ export default function Home() {
             鎏光机 AI 影片工作流工具
           </span>
           <span className="text-[10px]" style={{ color: "oklch(0.35 0.008 240)", fontFamily: "'JetBrains Mono', monospace" }}>
-            MJ → Gemini 3 Pro Image → Seedance 1.5 Pro
+            Image2 草图 → 资产库 @引用 → Seedance 2.0
           </span>
         </div>
       </div>

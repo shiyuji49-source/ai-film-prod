@@ -163,6 +163,8 @@ export const overseasProjects = mysqlTable("overseas_projects", {
   id: int("id").autoincrement().primaryKey(),
   userId: int("userId").notNull(),
   name: varchar("name", { length: 128 }).notNull().default("未命名剧集"),
+  /** 精品剧项目定义：一句话设定、受众、风格、创作约束等 */
+  definition: text("definition"),
   market: varchar("market", { length: 32 }).notNull().default("us"),
   aspectRatio: mysqlEnum("aspectRatio", ["landscape", "portrait"]).notNull().default("portrait"),
   style: mysqlEnum("style", ["realistic", "animation", "cg"]).notNull().default("realistic"),
@@ -171,9 +173,11 @@ export const overseasProjects = mysqlTable("overseas_projects", {
   status: mysqlEnum("status", ["draft", "in_progress", "completed"]).default("draft").notNull(),
   characters: text("characters").default("[]"),
   scenes: text("scenes").default("[]"),
+  /** 工作流类型：精品剧为当前主流程；batch 仅保留旧数据兼容 */
+  projectType: mysqlEnum("projectType", ["premium", "batch"]).default("premium").notNull(),
   /** 项目级图片引擎 */
   imageEngine: varchar("imageEngine", { length: 64 }).default("gemini_3_pro_image"),
-  videoEngine: mysqlEnum("videoEngine_proj", ["seedance_1_5", "seedance_2_0", "veo_3_1", "kling_3_0", "kling_3_0_omni", "runway_gen4", "hailuo_2_3", "grok_video_3", "sora_2_pro", "wan2_6"]).default("seedance_1_5"),
+  videoEngine: mysqlEnum("videoEngine_proj", ["seedance_1_5", "seedance_2_0", "veo_3_1", "kling_3_0", "kling_3_0_omni", "runway_gen4", "hailuo_2_3", "grok_video_3", "sora_2_pro", "wan2_6"]).default("seedance_2_0"),
   isDeleted: boolean("isDeleted").default(false).notNull(),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
@@ -199,6 +203,12 @@ export const scriptShots = mysqlTable("script_shots", {
   lastFrameUrl: text("lastFrameUrl"),
   firstFramePrompt: text("firstFramePrompt"),
   lastFramePrompt: text("lastFramePrompt"),
+  /** 精品剧分镜草图（image2 简笔画） */
+  storyboardPrompt: text("storyboardPrompt"),
+  storyboardSketchUrl: text("storyboardSketchUrl"),
+  /** 精品剧人物调度与摄影机机位示意图（image2） */
+  cameraDiagramPrompt: text("cameraDiagramPrompt"),
+  cameraDiagramUrl: text("cameraDiagramUrl"),
   videoUrl: text("videoUrl"),
   videoPrompt: text("videoPrompt"),
   /** 首帧图片引擎 */
@@ -238,7 +248,7 @@ export const overseasAssets = mysqlTable("overseas_assets", {
   id: int("id").autoincrement().primaryKey(),
   projectId: int("projectId").notNull(),
   userId: int("userId").notNull(),
-  type: mysqlEnum("type", ["character", "scene", "prop", "costume"]).default("character").notNull(),
+  type: mysqlEnum("type", ["character", "scene", "prop", "costume", "storyboard", "camera_diagram", "custom"]).default("character").notNull(),
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description"),
   /** 风格定调阶段 */

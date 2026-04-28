@@ -3,7 +3,7 @@ import { z } from "zod";
 import * as db from "../db";
 import { publicProcedure, router } from "../_core/trpc";
 import { ENV } from "../_core/env";
-import { callGPTFast, callGPTPro, GPT_MINI } from "../lib/vectorengine";
+import { callLLM } from "../services/llm-service";
 import {
   GEMINI_PRO_MODEL,
   GEMINI_FLASH_MODEL,
@@ -61,25 +61,23 @@ const GLOBAL_VIDEO_CONSTRAINTS = `
 - 旁白（VO）仅作为画外音，不在画面中显示文字
 `;
 
-// ─── AI API Helpers (via VectorEngine → Claude) ──────────────────────────────
-// Claude Sonnet 4.6: 剧本解析、分析等简单任务（原 callGeminiFlash）
-// Claude Opus 4.6: 分镜提示词生成等复杂创意任务（原 callGeminiPro/callGeminiProCreative）
+// ─── AI API Helpers (via llm-service → VectorEngine → claude-sonnet-4-6) ─────
 
-/** 剧本解析用：GPT-5.4-mini 快速模式（适合结构化输出） */
+/** 剧本解析用：快速模式（结构化输出，temperature 0.5） */
 const callGeminiFlash = (prompt: string, _maxOutputTokens = 65536) =>
-  callGPTFast([{ role: "user", content: prompt }], { max_tokens: _maxOutputTokens, temperature: 0.5 });
+  callLLM({ prompt, maxTokens: _maxOutputTokens, temperature: 0.5 });
 
-/** 分镜/视频提示词用：GPT-5.4-mini Pro 模式（适合逻辑推理类任务） */
+/** 分镜/视频提示词用：逻辑推理模式（temperature 0.7） */
 const callGeminiPro = (prompt: string, _maxOutputTokens = 8192) =>
-  callGPTPro([{ role: "user", content: prompt }], { max_tokens: _maxOutputTokens, temperature: 0.7 });
+  callLLM({ prompt, maxTokens: _maxOutputTokens, temperature: 0.7 });
 
-/** 资产提示词用：GPT-5.4-mini Pro 模式（感性创作，温度略高） */
+/** 资产提示词用：感性创作模式（temperature 0.9） */
 const callGeminiProCreative = (prompt: string, _maxOutputTokens = 8192) =>
-  callGPTPro([{ role: "user", content: prompt }], { max_tokens: _maxOutputTokens, temperature: 0.9 });
+  callLLM({ prompt, maxTokens: _maxOutputTokens, temperature: 0.9 });
 
-/** Legacy wrapper for backward compatibility */
+/** Legacy wrapper — 统一入口 */
 async function callGemini(prompt: string, maxOutputTokens = 65536): Promise<string> {
-  return callGPTFast([{ role: "user", content: prompt }], { max_tokens: maxOutputTokens });
+  return callLLM({ prompt, maxTokens: maxOutputTokens });
 }
 
 // Router -------------------------------------------------------------------
