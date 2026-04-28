@@ -1,6 +1,8 @@
 // Script format parser — supports .txt, .md, .fountain, .docx, .pdf
 // DESIGN: "鎏光机" 导演手册工业风暗色系
 
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+
 export type SupportedFormat = "txt" | "md" | "fountain" | "docx" | "pdf";
 
 export function detectFormat(file: File): SupportedFormat {
@@ -70,8 +72,7 @@ async function parseDocx(file: File): Promise<string> {
 async function parsePdf(file: File): Promise<string> {
   // Dynamically import to avoid SSR issues
   const pdfjsLib = await import("pdfjs-dist");
-  // Use the legacy build worker
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
