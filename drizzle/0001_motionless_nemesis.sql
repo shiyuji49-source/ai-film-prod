@@ -7,9 +7,9 @@ CREATE TABLE `api_settings` (
 	`apiBaseUrl` text,
 	`falApiKey` text,
 	`lastTestStatus` varchar(16) DEFAULT 'untested',
-	`lastTestedAt` timestamp,
-	`createdAt` timestamp NOT NULL DEFAULT (now()),
-	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	`lastTestedAt` datetime,
+	`createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	`updatedAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 	CONSTRAINT `api_settings_id` PRIMARY KEY(`id`),
 	CONSTRAINT `api_settings_userId_unique` UNIQUE(`userId`)
 );
@@ -40,8 +40,8 @@ CREATE TABLE `assets` (
 	`generationModel` varchar(64),
 	`status` enum('draft','generating','done','failed') NOT NULL DEFAULT 'draft',
 	`isDeleted` boolean NOT NULL DEFAULT false,
-	`createdAt` timestamp NOT NULL DEFAULT (now()),
-	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	`createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	`updatedAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 	CONSTRAINT `assets_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
@@ -53,7 +53,7 @@ CREATE TABLE `creditLogs` (
 	`action` enum('register_bonus','admin_grant','stripe_purchase','analyze_script','generate_shot','generate_prompt') NOT NULL,
 	`projectId` int,
 	`note` varchar(256),
-	`createdAt` timestamp NOT NULL DEFAULT (now()),
+	`createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	CONSTRAINT `creditLogs_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
@@ -79,8 +79,8 @@ CREATE TABLE `orders` (
 	`credits` int NOT NULL,
 	`amountFen` int NOT NULL,
 	`status` enum('pending','paid','failed','refunded') NOT NULL DEFAULT 'pending',
-	`createdAt` timestamp NOT NULL DEFAULT (now()),
-	`paidAt` timestamp,
+	`createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	`paidAt` datetime,
 	CONSTRAINT `orders_id` PRIMARY KEY(`id`),
 	CONSTRAINT `orders_stripeSessionId_unique` UNIQUE(`stripeSessionId`)
 );
@@ -102,8 +102,8 @@ CREATE TABLE `overseas_assets` (
 	`tags` varchar(500),
 	`isGlobalRef` boolean NOT NULL DEFAULT false,
 	`sortOrder` int NOT NULL DEFAULT 0,
-	`createdAt` timestamp NOT NULL DEFAULT (now()),
-	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	`createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	`updatedAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 	CONSTRAINT `overseas_assets_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
@@ -120,8 +120,8 @@ CREATE TABLE `overseas_projects` (
 	`characters` text DEFAULT ('[]'),
 	`scenes` text DEFAULT ('[]'),
 	`isDeleted` boolean NOT NULL DEFAULT false,
-	`createdAt` timestamp NOT NULL DEFAULT (now()),
-	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	`createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	`updatedAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 	CONSTRAINT `overseas_projects_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
@@ -131,9 +131,9 @@ CREATE TABLE `projects` (
 	`clientId` varchar(32) NOT NULL,
 	`name` varchar(128) NOT NULL DEFAULT '未命名项目',
 	`data` text NOT NULL DEFAULT ('{}'),
-	`lastActiveAt` timestamp NOT NULL DEFAULT (now()),
-	`createdAt` timestamp NOT NULL DEFAULT (now()),
-	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	`lastActiveAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	`createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	`updatedAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 	`isDeleted` boolean NOT NULL DEFAULT false,
 	CONSTRAINT `projects_id` PRIMARY KEY(`id`)
 );
@@ -160,8 +160,8 @@ CREATE TABLE `script_shots` (
 	`videoDuration` int,
 	`status` enum('draft','generating_frame','frame_done','generating_video','done','failed') NOT NULL DEFAULT 'draft',
 	`errorMessage` text,
-	`createdAt` timestamp NOT NULL DEFAULT (now()),
-	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	`createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	`updatedAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 	CONSTRAINT `script_shots_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
@@ -170,7 +170,7 @@ CREATE TABLE `teamMembers` (
 	`teamId` int NOT NULL,
 	`userId` int NOT NULL,
 	`role` enum('owner','editor','viewer') NOT NULL DEFAULT 'viewer',
-	`joinedAt` timestamp NOT NULL DEFAULT (now()),
+	`joinedAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	CONSTRAINT `teamMembers_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
@@ -178,7 +178,7 @@ CREATE TABLE `teams` (
 	`id` int AUTO_INCREMENT NOT NULL,
 	`name` varchar(128) NOT NULL,
 	`ownerId` int NOT NULL,
-	`createdAt` timestamp NOT NULL DEFAULT (now()),
+	`createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
 	CONSTRAINT `teams_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
@@ -191,8 +191,8 @@ CREATE TABLE `video_jobs` (
 	`status` enum('pending','processing','done','failed') NOT NULL DEFAULT 'pending',
 	`videoUrl` text,
 	`errorMessage` text,
-	`createdAt` timestamp NOT NULL DEFAULT (now()),
-	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	`createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	`updatedAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 	CONSTRAINT `video_jobs_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint

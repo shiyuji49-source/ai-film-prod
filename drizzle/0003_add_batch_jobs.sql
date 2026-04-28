@@ -10,8 +10,8 @@ CREATE TABLE `batchJobs` (
 	`succeeded` int NOT NULL DEFAULT 0,
 	`failed` int NOT NULL DEFAULT 0,
 	`errorMsg` text,
-	`createdAt` timestamp NOT NULL DEFAULT (now()),
-	`updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,
+	`createdAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+	`updatedAt` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
 	CONSTRAINT `batchJobs_id` PRIMARY KEY(`id`)
 );
 --> statement-breakpoint
