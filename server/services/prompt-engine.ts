@@ -1,9 +1,9 @@
 /**
- * Prompt Engine — 双线路提示词生成引擎
+ * Prompt Engine — 精品剧提示词生成引擎
  *
  * 每个函数内部：组装 system prompt + user prompt → callLLM → 解析返回。
  *
- * System Prompt 模板硬编码在此文件（3.1-3.6节）。
+ * System Prompt 模板硬编码在此文件。
  *
  * 共用阶段：
  *   - generateDirectorAnalysis   — 讲戏本 + 人物清单 + 场景清单
@@ -11,13 +11,12 @@
  *   - generateScenePrompt        — 场景环境提示词（供 image-service 生图）
  *
  * 精品剧路线（Seedance 2.0 文生视频）：
- *   - generateSeedance2Prompt    — 多参考文生视频提示词（含 @tag 引用）
- *
- * 跑量剧路线（Seedance 1.5 Pro 首尾帧图生视频）：
- *   - generateFramePrompts       — 首帧+尾帧提示词对
- *   - generateMotionPrompt       — 运动提示词（英文 60 词以内）
+ *   - generateProjectBible       — 项目圣经
+ *   - generateSeedance2Prompt    — 多参考文生视频提示词（含 @Image 引用）
+ *   - generateStoryboardSketchPrompt / generateCameraDiagramPrompt — image2 草图提示词
  */
 import { callLLM } from "./llm-service";
+import { buildVisualStylePrompt, getVisualStylePreset } from "../../shared/visualStyles";
 
 // ─── 共用类型 ──────────────────────────────────────────────────────────────────
 
@@ -51,38 +50,110 @@ export interface DirectorAnalysis {
   scenes: Array<{ name: string; description: string; atmosphere: string; lightNote?: string }>;
 }
 
+export interface ProjectPromptContext {
+  projectDefinition?: string | null;
+  projectBible?: string | null;
+  visualStylePreset?: string | null;
+  styleEnhancers?: string[] | null;
+  visualStylePrompt?: string | null;
+  aspectRatio?: "16:9" | "9:16";
+}
+
+export interface ProjectBible {
+  projectBible: string;
+  logline: string;
+  inferredFormat: string;
+  mainCharacters: Array<{ name: string; continuityRule: string; performanceRule: string }>;
+  coreLocations: Array<{ name: string; continuityRule: string }>;
+  visualRules: string;
+  continuityRules: string[];
+  avoidRules: string[];
+}
+
 // ─── System Prompt 模板 ────────────────────────────────────────────────────────
 
+const PROMPT_METHODOLOGY = `核心方法论：
+- 提示词不是文学愿望，而是给模型分配注意力权重。
+- 少写抽象词，多写可见动作、画面中心、摄影机位置、光线、材质、空气介质和稳定性约束。
+- 情绪必须拆成眼神、眉毛、嘴角、呼吸、手部动作、身体节奏、停顿和语气，不能只写“悲伤/高级/紧张”。
+- 人物表演必须包含留白和潜台词：角色真实想法不必直说，要通过回避视线、沉默、呼吸、手部动作和语气控制外化。
+- 影像风格必须拆成摄影机质感、光学质感、光影方式、空气介质、材质反光、曝光反差和空间层次。
+- 图生/参考图视频必须尊重参考图，保持人物、服装、道具、场景、构图一致。
+- 动作越大越容易失稳，优先小幅、缓慢、连续动作；环境运动和光线变化可以承担质感。
+- 必须检查内部冲突：背对镜头又要求正脸、远景又要求微表情、静止又复杂动作、黑暗又看清所有细节、快速运镜又精致细节稳定。`;
+
+/** 项目圣经 System Prompt */
+const PROJECT_BIBLE_SYSTEM_PROMPT = `你是资深影视导演、剧本统筹和 AI 影像制作总监。你的任务是根据用户剧本生成“项目圣经”。
+
+项目圣经不是宣传文案，而是后续所有分镜、资产提示词、image2 草图提示词、Seedance 2.0 视频提示词都要遵守的统一导演手册。
+
+${PROMPT_METHODOLOGY}
+
+规则：
+- 不要求用户输入题材、平台、集数、单集时长；你需要从剧本中智能识别。
+- 不改写原剧情，不新增剧本里不存在的关键事件。
+- 输出要可执行，能约束后续生成保持一致。
+- 视觉风格必须结合用户选择的摄影风格预设和增强标签，但允许从剧本内容中补充更具体的光线、材质和表演规则。
+- 表演规则要写出语气、潜台词、停顿和微表情，不要只写“悲伤/紧张/高级”。
+- 连续性规则要明确哪些人物脸、服装、场景、关键道具不能改变。`;
+
 /** 3.1 导演分析 System Prompt */
-const DIRECTOR_ANALYSIS_SYSTEM_PROMPT = `你是一名资深影视导演。你的任务是分析剧本，为每个剧情点"讲戏"——像给演员和摄影师讲戏一样，把脑海中的影像完整描述出来。
+const DIRECTOR_ANALYSIS_SYSTEM_PROMPT = `你是一名资深影视导演和短剧分镜统筹。你的任务是分析剧本，为每个剧情点“讲戏”，像给演员、摄影、美术和剪辑讲戏一样，把镜头的节奏、表演和画面完整交代清楚。
 
-## 输出格式
+${PROMPT_METHODOLOGY}
 
-### 讲戏本
-为每个剧情点输出：
-- 剧情点编号和标题
-- 导演阐述：用完整段落描述这个镜头应该是什么样的画面。包括：
-  - 景别和机位（特写/中景/全景，俯拍/平拍等）
-  - 人物的具体动作链（从A状态到B状态的完整物理动作过渡）
-  - 光线描述（具体到方向、色温、强度，如"灰蓝色的清晨微光从左侧单窗斜射入室内"）
-  - 情绪和氛围（通过视觉细节传达，不要抽象描述）
-- 建议时长（4-15秒，每个beat约2.5秒，头尾各留0.5秒安全区）
-- 涉及的人物
-- 涉及的场景
-
-### 人物清单
-列出需要生成参考图的角色（出场2+个剧情点或预计后续复现的人物）：
-| 角色名 | 外观关键词 | 出场剧情点 | 素材状态（新增/复用/变体）|
-
-### 场景清单
-| 场景名 | 时间 | 光线 | 色调 | 关键道具 | 出场剧情点 | 素材状态 |
-
-## 规则
-- 讲戏描述必须具体到摄影师不需要再问"你到底要什么效果"
-- 光影必须具体到方向和色温，"光线柔和"不够具体
-- 动作链必须连续，不能跳跃（上一秒做X下一秒突然做Y）
-- 群演不入人物清单，但讲戏中需要具体描述其外观
+输出规则：
+- 每个剧情点要说明戏剧任务：推进信息、情绪转折、动作事件、环境建立或过渡。
+- 不机械规定时长。你要根据台词长度、动作复杂度、表演留白和画面信息量裁定合理时长。
+- 台词镜头要估算语速和停顿：正常中文约每秒4-6字，克制迟疑约每秒2.5-4字，急促争吵约每秒6-8字。
+- 重要台词前后必须保留反应时间；台词过长时建议拆成多个镜头。
+- 情绪表演镜头宁可少动作、多停顿，保留眼神、呼吸和潜台词。
+- 动作镜头必须有起势、过程、收势，不能突然跳变。
+- 每个镜头只放一个主要戏剧动作，不要把多个剧情事件强塞进一个镜头。
+- 光影必须具体到方向、色温、强度和可见材质；“光线柔和”不够。
+- 群演不进入人物资产清单，但镜头中如需要出现，必须作为弱背景处理，不能抢主体。
 `;
+
+/** 资产提示词生成器 System Prompt */
+export const ASSET_PROMPT_SYSTEM = `你是影视美术总监、资产库统筹和 AI 图像提示词设计师。你的任务是从剧本中提取可复用资产，并为每个资产写出稳定、可复用、可编辑的资产提示词。
+
+资产提示词不是立刻生成资产图。它是后续用户上传参考图、分镜草图、Seedance 2.0 多参考生成时保持连续性的“资产说明书”。
+
+${PROMPT_METHODOLOGY}
+
+资产识别范围：
+- character：有名字或反复出现的人物。必须提取脸、年龄感、体态、发型、服装、身份、表演基线和连续性禁忌。
+- scene：反复出现或承担关键戏剧功能的场景。必须提取空间布局、时间段、可见光源、空气介质、材质、可移动道具和禁忌。
+- costume：可复用服装/妆发/伤痕/状态变化。必须说明适用人物、材质、层次、脏旧程度、连续性。
+- prop：推动剧情或需要保持一致的道具。必须说明外形、材质、尺寸、磨损、使用方式和出现集数。
+- custom：用户可能继续补充的特殊参考，如图腾、车辆、界面、书信、武器、仪式物件等。
+
+写法规则：
+- 先判断主权重：这个资产最不能变的 3-5 个可见信息。
+- 再写辅助权重：光影、空气、材质、情绪基线、使用场合。
+- 把抽象词翻译成画面细节。例如“阴郁”要写成低照度、下垂眼神、暗部厚、肩膀收紧。
+- 同一人物不要重复建多个资产；如果有服装或状态变化，写成 variationRule。
+- 不要编造剧本没有的核心设定。剧本未写清的外观，可用“待用户补充”标注。
+- 每个提示词都必须可被用户编辑，不要写不可执行的文学句子。
+
+严格输出 JSON：
+{
+  "assets": [
+    {
+      "type": "character|scene|costume|prop|custom",
+      "name": "资产名称",
+      "status": "confirmed|needs_user_input",
+      "priority": "high|medium|low",
+      "mainWeight": "最不能改变的可见信息",
+      "supportingWeight": "光影、材质、空气、情绪和使用场合",
+      "assetPrompt": "可直接保存到资产库的中文资产提示词",
+      "continuityRule": "后续分镜和 Seedance 生成必须保持的一致性规则",
+      "variationRule": "服装、伤痕、状态变化如何管理",
+      "usedInEpisodes": "出现集数或未知",
+      "conflictCheck": "潜在冲突和需要用户补充的信息"
+    }
+  ]
+}`;
 
 /** 3.2 资产设计 System Prompt（角色） */
 const CHARACTER_PROMPT_SYSTEM = `你是一名专业的影视美术设定师。你的任务是为角色编写文生图提示词。
@@ -181,77 +252,76 @@ const FRAME_PROMPT_SYSTEM = `你是一名首尾帧提示词设计师。你的任
 `;
 
 /** 3.5 Seedance 2.0 提示词 System Prompt（精品剧专用） */
-const SEEDANCE2_PROMPT_SYSTEM = `你是一名 Seedance 2.0 视频提示词专家。Seedance 2.0 是文生视频+多参考模式，用户提供角色参考图和场景参考图，模型基于提示词和参考图生成视频。
+const SEEDANCE2_PROMPT_SYSTEM = `你是影视导演、表演指导、摄影指导和 Seedance 2.0 提示词设计师。
 
-## 重要：Seedance 2.0 不使用首尾帧！
-Seedance 2.0 的工作方式是：文本提示词 + @引用参考图（角色/场景/风格） → 直接生成视频。
-不要提到首帧、尾帧、first frame、last frame。
+你的任务不是机械改写分镜，而是先判断镜头的戏剧节拍、台词时长、表演留白、动作密度和参考图约束，再产出一条可直接提交给 Seedance 2.0 的视频提示词。
 
-## 输入
-你会收到：
-- 镜头描述（这个镜头里发生的事件）
-- 镜头时长（目标秒数）
-- 参考图列表（将作为 @Image1=角色A参考, @Image2=角色B参考, @Image3=场景参考 等）
+Seedance 2.0 工作模式：
+- 文本提示词 + 多张参考图。
+- 参考图可能包括人物、场景、服装、道具、分镜草图、人物调度与机位示意图。
+- 不使用首帧/尾帧逻辑，不要写 first frame / last frame。
 
-## 提示词结构（英文）
-[Subject（主体描述+外观关键特征）],
-[Action（核心动作 + 运动方式/速度）],
-[Secondary motion（次要运动：头发/衣摆/光影变化等）],
-[Camera（镜头运动：pan/dolly/orbit/tracking/zoom/static + 方向 + 速度）],
-[Scene + Lighting（场景环境 + 光影描述）],
-[Style（视觉风格 + 色调）].
-Maintain face and clothing consistency, no distortion, high detail.
-Character face stable without deformation, normal human structure, natural and smooth movements.
-Generate video without subtitles.
-Use @Image1 as character reference, @Image2 as scene reference.
+${PROMPT_METHODOLOGY}
 
-## 规则
-1. 每个镜头一个核心动作动词
-2. 运动节奏匹配时长：
-   - 2-3秒 → swift, quick, sudden
-   - 4-6秒 → steady, gradual, smooth
-   - 7-10秒 → slow, gentle, lingering
-   - 10-15秒 → deliberate, contemplative, unhurried
-3. 必须包含次要运动（头发飘动、衣摆摇曳等）
-4. 必须指定镜头运动（或 static camera）
-5. 物理细节提升真实感（摩擦、重力、碰撞等）
-6. 角色外观关键特征要简要重复（与参考图呼应）
+镜头节奏裁定：
+1. 必须先判断镜头类型：情绪表演 / 台词 / 动作 / 环境建立 / 过渡 / 群像。
+2. 不允许机械固定为 0-3 秒、3-10 秒、10-15 秒。必须根据上一层分镜内容智能划分时间段。
+3. 一个约 15 秒镜头通常只容纳 2-5 个节拍。情绪表演镜头节拍更少，动作镜头必须包含起势、过程、收势，环境建立镜头必须让观众读清空间。
+4. 如果台词超过目标时长能承载的密度，或动作、走位、人物数量过多，必须在 riskCheck 中建议拆镜头，而不是强塞。
+5. 每个关键动作前后至少保留 0.5-1 秒缓冲；结尾尽量保留 1 秒左右的余味，用于眼神落点、反应、呼吸或环境声画延续。
 
-## 禁止项
-- 不要使用负向提示词（如 "no blur"，改用 "sharp focus"）
-- 不要在单镜头中放多个核心动作动词
-- 避免物理上不可能的运动轨迹
-- 单镜头最多 1-2 个角色
+台词与表演裁定：
+- 中文正常语速：每秒约 4-6 字。
+- 压低、迟疑、克制：每秒约 2.5-4 字。
+- 急促争吵：每秒约 6-8 字。
+- 台词前要安排吸气、回避视线或沉默；重要台词中要有停顿点；台词后要留反应。
+- 台词期间人物动作要收敛，不要同时安排复杂走位和复杂运镜。
+- 表演要写语气、潜台词和留白：轻声、压低、试探、强撑、冷淡、犹豫、欲言又止等必须通过微表情和身体节奏体现。
 
-## 长度
-控制在 30-200 词（英文）。
+成品提示词要求：
+- 中文输出，适合直接提交给 Seedance 2.0。
+- 开头说明 @Image 的用途，例如 @Image1 作为女主角人物参考，@Image2 作为走廊场景参考，@Image3 作为分镜草图或机位示意图参考。
+- 保持参考图中的人物脸部特征、服装、道具、场景、画幅和视觉风格一致。
+- @Image 的引用必须服务生成：人物参考优先锁脸和服装，场景参考锁空间与光源，分镜草图锁构图和站位，机位示意图锁运动路线。
+- 时间段按智能裁定输出，可以是 2 段、3 段、4 段或 5 段，但每段都必须有明确时长范围。
+- 每段只承担一个主要戏剧任务，并写清人物动作、微表情、语气/潜台词、镜头运动、光线和环境微动。
+- 台词要写“怎么说”，不是只抄台词：压低、轻声、试探、强撑、冷淡、打断、欲言又止等要和身体反应对应。
+- 画面运动要小而连续，人物调度和摄影机运动不能同时复杂；如果人物移动复杂，摄影机应稳定跟随；如果摄影机运动明显，人物动作应收敛。
+- 结尾加入稳定性约束：不新增无关人物，不改变脸，不改变服装道具，不生成字幕，不快速旋转镜头，不让动作跳变。
 
-## @引用规则
-根据提供的参考图列表，在提示词末尾标注每张图的角色：
-Use @Image1 as [角色A名] character reference, @Image2 as [场景名] scene reference.
-
-直接输出英文提示词，不要解释。
-`;
+严格输出 JSON：
+{
+  "finalPrompt": "可直接提交给 Seedance 2.0 的完整中文提示词",
+  "shotType": "情绪表演/台词/动作/环境建立/过渡/群像",
+  "durationSec": 15,
+  "beats": [
+    { "timeRange": "0-4秒", "purpose": "节拍任务", "performanceNote": "表演、语气、潜台词与留白" }
+  ],
+  "usedReferences": ["@Image1 人物参考"],
+  "riskCheck": "内容密度、台词时长、动作复杂度和参考图冲突检查"
+}`;
 
 /** 精品剧分镜草图 System Prompt */
-const STORYBOARD_SKETCH_SYSTEM = `你是一名专业影视分镜师。你的任务是把镜头设计转写成适合 image2 生成的分镜草图提示词。
+const STORYBOARD_SKETCH_SYSTEM = `你是一名专业影视分镜师和 gpt-image-2 分镜草图提示词设计师。你的任务是把镜头设计转写成适合 gpt-image-2 生成黑白分镜草图的提示词。
 
 输出必须是一段可直接用于生图的中文提示词，要求：
 - 黑白简笔线稿，粗略手绘 storyboard sketch，保留构图、人物站位、景别、视线方向
 - 画面不能像成片剧照，不能追求精致渲染
 - 必须包含：景别、机位角度、人物数量与站位、主体动作、场景空间关系、关键道具
+- 必须体现画幅比例，9:16 时强调竖向构图层次，16:9 时强调横向空间关系
 - 允许使用箭头表达视线/移动方向，但不要生成文字、字幕、Logo、水印
 - 单张图，只画当前镜头，不要拼图，不要多格漫画
 
 只输出提示词本身，不要解释。`;
 
 /** 精品剧人物调度与机位示意图 System Prompt */
-const CAMERA_DIAGRAM_SYSTEM = `你是一名导演组现场调度图设计师。你的任务是把一个 15 秒左右的视频镜头，转写成适合 image2 生成的“人物调度与摄影机机位运动示意图”提示词。
+const CAMERA_DIAGRAM_SYSTEM = `你是一名导演组现场调度图设计师和 gpt-image-2 图像提示词设计师。你的任务是把一个视频镜头转写成适合 gpt-image-2 生成的“人物调度与摄影机机位运动示意图”提示词。
 
 输出必须是一段可直接用于生图的中文提示词，要求：
 - 黑白线稿示意图，不是剧照，不是海报
 - 以俯视平面图为主，可加入小幅侧视补充，但必须清晰表达空间关系
-- 必须包含：人物起点/终点、运动路线箭头、摄影机位置、镜头朝向、机位运动轨迹、景别变化
+- 必须根据 Seedance 视频提示词中的智能节拍提取：人物起点/终点、运动路线箭头、摄影机位置、镜头朝向、机位运动轨迹、景别变化
+- 若镜头是台词或情绪表演镜头，要用较少箭头表达停顿、视线方向和人物距离，而不是强行画复杂走位
 - 用简单几何符号、箭头、虚线轨迹表达，不要复杂写实细节
 - 不要生成可读文字、字幕、Logo、水印
 
@@ -298,6 +368,90 @@ The [subject] [primary_action] [manner/speed],
 `;
 
 // ─── 共用阶段函数 ──────────────────────────────────────────────────────────────
+
+function resolveVisualStyle(context?: ProjectPromptContext) {
+  const preset = getVisualStylePreset(context?.visualStylePreset);
+  return context?.visualStylePrompt?.trim() || buildVisualStylePrompt(preset, context?.styleEnhancers ?? []);
+}
+
+export async function generateProjectBible(
+  script: string,
+  context: ProjectPromptContext
+): Promise<ProjectBible> {
+  const visualStyle = resolveVisualStyle(context);
+  const response = await callLLM({
+    systemPrompt: PROJECT_BIBLE_SYSTEM_PROMPT,
+    prompt: `项目定义：
+${context.projectDefinition || "用户未填写，需从剧本中识别。"}
+
+画幅：${context.aspectRatio || "9:16"}
+
+视觉风格锁定词：
+${visualStyle}
+
+剧本：
+${script.slice(0, 80000)}
+
+请输出 JSON。`,
+    responseFormat: {
+      type: "json_schema",
+      json_schema: {
+        name: "project_bible",
+        strict: true,
+        schema: {
+          type: "object",
+          properties: {
+            projectBible: { type: "string" },
+            logline: { type: "string" },
+            inferredFormat: { type: "string" },
+            mainCharacters: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                  continuityRule: { type: "string" },
+                  performanceRule: { type: "string" },
+                },
+                required: ["name", "continuityRule", "performanceRule"],
+                additionalProperties: false,
+              },
+            },
+            coreLocations: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string" },
+                  continuityRule: { type: "string" },
+                },
+                required: ["name", "continuityRule"],
+                additionalProperties: false,
+              },
+            },
+            visualRules: { type: "string" },
+            continuityRules: { type: "array", items: { type: "string" } },
+            avoidRules: { type: "array", items: { type: "string" } },
+          },
+          required: [
+            "projectBible",
+            "logline",
+            "inferredFormat",
+            "mainCharacters",
+            "coreLocations",
+            "visualRules",
+            "continuityRules",
+            "avoidRules",
+          ],
+          additionalProperties: false,
+        },
+      },
+    },
+    temperature: 0.65,
+  });
+
+  return JSON.parse(response) as ProjectBible;
+}
 
 /**
  * 导演分析（共用阶段）
@@ -451,9 +605,11 @@ export interface Seedance2ReferenceImage {
  */
 export async function generateSeedance2Prompt(
   shot: ShotInfo,
-  referenceImages: Seedance2ReferenceImage[]
+  referenceImages: Seedance2ReferenceImage[],
+  context: ProjectPromptContext = {}
 ): Promise<string> {
   const duration = shot.duration ?? 5;
+  const visualStyle = resolveVisualStyle(context);
 
   // 构建参考图映射说明
   const refList = referenceImages
@@ -461,9 +617,9 @@ export async function generateSeedance2Prompt(
     .map((r, i) => `@Image${i + 1} = ${r.name}（${r.role}参考）`)
     .join("\n");
 
-  return callLLM({
+  const response = await callLLM({
     systemPrompt: SEEDANCE2_PROMPT_SYSTEM,
-    prompt: `请为以下镜头生成 Seedance 2.0 视频提示词（英文，${30}-${200}词）：
+    prompt: `请为以下镜头生成 Seedance 2.0 视频提示词：
 
 镜头编号：${shot.shotNumber}
 场景：${shot.sceneName}
@@ -473,13 +629,62 @@ ${shot.dialogue ? `台词："${shot.dialogue}"` : ""}
 ${shot.characters ? `人物：${shot.characters}` : ""}
 ${shot.emotion ? `情绪：${shot.emotion}` : ""}
 目标时长：${duration}秒
+画幅：${context.aspectRatio || "9:16"}
+
+项目定义：
+${context.projectDefinition || "未提供"}
+
+项目圣经：
+${context.projectBible || "未生成，请仅基于镜头和风格保持一致"}
+
+视觉风格锁定词：
+${visualStyle}
 
 可用参考图：
 ${refList || "（无参考图）"}
 
-直接输出英文提示词。`,
+请严格输出 JSON。`,
+    responseFormat: {
+      type: "json_schema",
+      json_schema: {
+        name: "seedance2_prompt_plan",
+        strict: true,
+        schema: {
+          type: "object",
+          properties: {
+            finalPrompt: { type: "string" },
+            shotType: { type: "string" },
+            durationSec: { type: "integer" },
+            beats: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  timeRange: { type: "string" },
+                  purpose: { type: "string" },
+                  performanceNote: { type: "string" },
+                },
+                required: ["timeRange", "purpose", "performanceNote"],
+                additionalProperties: false,
+              },
+            },
+            usedReferences: { type: "array", items: { type: "string" } },
+            riskCheck: { type: "string" },
+          },
+          required: ["finalPrompt", "shotType", "durationSec", "beats", "usedReferences", "riskCheck"],
+          additionalProperties: false,
+        },
+      },
+    },
     temperature: 0.8,
   });
+
+  try {
+    const parsed = JSON.parse(response) as { finalPrompt?: string };
+    return (parsed.finalPrompt || response).trim();
+  } catch {
+    return response.trim();
+  }
 }
 
 /**
@@ -491,13 +696,16 @@ ${refList || "（无参考图）"}
  */
 export async function generateStoryboardSketchPrompt(
   shot: ShotInfo,
-  style: string
+  style: string,
+  context: ProjectPromptContext = {}
 ): Promise<string> {
   return callLLM({
     systemPrompt: STORYBOARD_SKETCH_SYSTEM,
     prompt: `请把以下镜头改写成 image2 分镜草图提示词：
 
 项目风格：${style}
+画幅：${context.aspectRatio || "9:16"}
+项目圣经摘要：${context.projectBible || "未提供"}
 镜头编号：${shot.shotNumber}
 场景：${shot.sceneName}
 景别机位：${shot.shotType}
@@ -520,7 +728,8 @@ ${shot.emotion ? `情绪：${shot.emotion}` : ""}
  */
 export async function generateCameraDiagramPrompt(
   shot: ShotInfo,
-  seedancePrompt?: string
+  seedancePrompt?: string,
+  context: ProjectPromptContext = {}
 ): Promise<string> {
   return callLLM({
     systemPrompt: CAMERA_DIAGRAM_SYSTEM,
@@ -534,6 +743,8 @@ ${shot.dialogue ? `台词/旁白：${shot.dialogue}` : ""}
 ${shot.characters ? `人物：${shot.characters}` : ""}
 ${shot.emotion ? `情绪：${shot.emotion}` : ""}
 目标时长：${shot.duration ?? 15}秒
+画幅：${context.aspectRatio || "9:16"}
+项目圣经摘要：${context.projectBible || "未提供"}
 ${seedancePrompt ? `Seedance 2.0 视频提示词：${seedancePrompt}` : ""}
 
 输出一段中文提示词。`,

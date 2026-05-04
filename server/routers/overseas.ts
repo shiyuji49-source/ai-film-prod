@@ -10,8 +10,10 @@ import { callLLM } from "../services/llm-service";
 import { generateImage, type ImageEngine } from "../services/image-service";
 import { generateVideo, type VideoEngine } from "../services/video-service";
 import {
+  ASSET_PROMPT_SYSTEM,
   generateCameraDiagramPrompt,
   generateFramePrompts,
+  generateProjectBible,
   generateMotionPrompt,
   generateSeedance2Prompt,
   generateStoryboardSketchPrompt,
@@ -19,6 +21,7 @@ import {
   type ShotInfo,
 } from "../services/prompt-engine";
 import { ENV } from "../_core/env";
+import { buildVisualStylePrompt, getVisualStylePreset, validateStyleEnhancers } from "../../shared/visualStyles";
 import pLimit from "p-limit";
 
 // ─── 项目 CRUD ────────────────────────────────────────────────────────────────
@@ -30,7 +33,11 @@ const createProjectSchema = z.object({
   aspectRatio: z.enum(["landscape", "portrait"]).default("portrait"),
   style: z.enum(["realistic", "animation", "cg"]).default("realistic"),
   genre: z.string().default("romance"),
-  totalEpisodes: z.number().int().min(1).max(100).default(20),
+  visualStylePreset: z.string().default("natural_practical_light"),
+  styleEnhancers: z.string().optional(),
+  visualStylePrompt: z.string().optional(),
+  projectBible: z.string().optional(),
+  totalEpisodes: z.number().int().min(1).max(100).optional(),
   /** 工作流类型：精品剧为主流程；batch 仅保留旧数据兼容 */
   projectType: z.enum(["premium", "batch"]).default("premium"),
 });
@@ -189,6 +196,21 @@ function assetReferenceRole(asset: typeof overseasAssets.$inferSelect): Seedance
   return "style";
 }
 
+function parseStyleEnhancers(value?: string | null): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.filter((item): item is string => typeof item === "string").slice(0, 5);
+  } catch {
+    return value.split(",").map((item) => item.trim()).filter(Boolean).slice(0, 5);
+  }
+  return [];
+}
+
+function resolveProjectVisualStyle(project: typeof overseasProjects.$inferSelect, styleEnhancers = parseStyleEnhancers(project.styleEnhancers)) {
+  return project.visualStylePrompt?.trim() || buildVisualStylePrompt(getVisualStylePreset(project.visualStylePreset), styleEnhancers);
+}
+
 export const overseasRouter = router({
   // ── 列出所有项目 ──────────────────────────────────────────────────────────
   listProjects: protectedProcedure.query(async ({ ctx }) => {
@@ -206,6 +228,9 @@ export const overseasRouter = router({
 
   // ── 创建项目 ──────────────────────────────────────────────────────────────
   createProject: protectedProcedure.input(createProjectSchema).mutation(async ({ ctx, input }) => {
+    const stylePreset = getVisualStylePreset(input.visualStylePreset);
+    const { selectedIds } = validateStyleEnhancers(parseStyleEnhancers(input.styleEnhancers));
+    const visualStylePrompt = input.visualStylePrompt?.trim() || buildVisualStylePrompt(stylePreset, selectedIds);
     const [result] = await (await getDb())!.insert(overseasProjects).values({
       userId: ctx.user.id,
       name: input.name,
@@ -214,6 +239,10 @@ export const overseasRouter = router({
       aspectRatio: input.aspectRatio,
       style: input.style,
       genre: input.genre,
+      visualStylePreset: stylePreset.id,
+      styleEnhancers: JSON.stringify(selectedIds),
+      visualStylePrompt,
+      projectBible: input.projectBible,
       totalEpisodes: input.totalEpisodes,
       projectType: "premium",
       videoEngine: "seedance_2_0",
@@ -227,6 +256,13 @@ export const overseasRouter = router({
   // ── 更新项目 ──────────────────────────────────────────────────────────────
   updateProject: protectedProcedure.input(updateProjectSchema).mutation(async ({ ctx, input }) => {
     const { id, ...rest } = input;
+    const styleEnhancers = parseStyleEnhancers(rest.styleEnhancers);
+    if (rest.visualStylePreset && !rest.visualStylePrompt?.trim()) {
+      rest.visualStylePrompt = buildVisualStylePrompt(getVisualStylePreset(rest.visualStylePreset), styleEnhancers);
+    }
+    if (rest.styleEnhancers) {
+      rest.styleEnhancers = JSON.stringify(validateStyleEnhancers(styleEnhancers).selectedIds);
+    }
     await (await getDb())!
       .update(overseasProjects)
       .set(rest)
@@ -260,6 +296,43 @@ export const overseasRouter = router({
 
     return { project, shots };
   }),
+
+  // ── 生成项目圣经：后续所有提示词的统一导演手册 ─────────────────────────────
+  generateProjectBible: protectedProcedure
+    .input(z.object({
+      projectId: z.number().int(),
+      scriptText: z.string().min(10).max(200000),
+    }))
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      const [project] = await db!
+        .select()
+        .from(overseasProjects)
+        .where(and(eq(overseasProjects.id, input.projectId), eq(overseasProjects.userId, ctx.user.id)));
+      if (!project) throw new Error("Project not found");
+
+      const aspectRatio = project.aspectRatio === "portrait" ? "9:16" : "16:9";
+      const styleEnhancers = parseStyleEnhancers(project.styleEnhancers);
+      const bible = await generateProjectBible(input.scriptText, {
+        projectDefinition: project.definition,
+        projectBible: project.projectBible,
+        visualStylePreset: project.visualStylePreset,
+        styleEnhancers,
+        visualStylePrompt: resolveProjectVisualStyle(project, styleEnhancers),
+        aspectRatio,
+      });
+
+      await db!
+        .update(overseasProjects)
+        .set({
+          projectBible: bible.projectBible,
+          characters: JSON.stringify(bible.mainCharacters),
+          scenes: JSON.stringify(bible.coreLocations),
+        })
+        .where(eq(overseasProjects.id, project.id));
+
+      return bible;
+    }),
 
   // ── 获取项目进度统计 ──────────────────────────────────────────────────────
   getProjectProgress: protectedProcedure
@@ -330,20 +403,25 @@ export const overseasRouter = router({
       try {
         const aspectLabel = project.aspectRatio === "portrait" ? "vertical 9:16" : "horizontal 16:9";
         const langLabel = language === "en" ? "English" : language === "zh" ? "Chinese" : language;
+        const visualStyle = resolveProjectVisualStyle(project);
 
-        const systemPrompt = `You are a professional short drama director and script breakdown specialist.
-Your task is to analyze a short drama script and break it down into individual shots for AI video generation.
+        const systemPrompt = `You are a professional film director, performance coach, and AI video shot breakdown specialist.
+Break the script into shots for a premium Seedance 2.0 workflow.
 
 Rules:
-- Generate 20-30 shots per episode maximum. Do NOT invent shots not in the script.
-- Each shot should be 4-8 seconds of video content
+- Do not invent events not in the script.
+- Do not force a fixed episode count or fixed shot duration.
+- Each shot should usually be 6-15 seconds. Choose duration by dialogue length, action complexity, performance pauses, and visual density.
+- A shot can carry only one main dramatic task. If dialogue is too long or action is too dense, split into more shots.
+- Dialogue shots need pauses, tone, subtext, and reaction time. Chinese normal speed is 4-6 characters/sec; restrained speech is 2.5-4 characters/sec; argument can be 6-8 characters/sec.
+- Performance must include negative space: hesitation, breath, gaze shift, small hand movement, silence before or after a line.
+- Visual descriptions must use visible actions, composition, camera, lighting, material, atmosphere, and continuity constraints.
 - All dialogue/narration must be in ${langLabel}
-- Visual descriptions must be detailed enough for AI image generation
-- Style: ${project.style} (photorealistic for realistic, etc.)
 - Aspect ratio: ${aspectLabel}
-- Genre: ${project.genre}
-- NO background music, NO subtitles in visual descriptions
-- Strictly follow the script content, do not add scenes not in the script`;
+- Project bible: ${project.projectBible || "not yet generated"}
+- Visual style lock:
+${visualStyle}
+- NO subtitles in visual descriptions.`;
 
         const userPrompt = `Analyze this Episode ${episodeNumber} script and generate a shot breakdown:
 
@@ -355,10 +433,11 @@ Return a JSON array of shots with this exact schema:
     "shotNumber": 1,
     "sceneName": "Scene name",
     "shotType": "close_up|medium|wide|extreme_close|aerial|over_shoulder",
-    "visualDescription": "Detailed English description of what's in the frame for AI image generation. Include: subject, action, setting, lighting, camera angle, mood. No subtitles, no background music.",
+    "visualDescription": "中文分镜画面设计：主体、动作、空间、摄影机位置、光影、空气介质、材质、表演留白和连续性约束。不要字幕，不要背景音乐。",
     "dialogue": "Character dialogue or narration in ${langLabel}, or empty string if none",
     "characters": "comma-separated character names in this shot",
-    "emotion": "emotional tone: tense|romantic|dramatic|comedic|mysterious|action|sad|happy"
+    "emotion": "emotional tone plus performance subtext",
+    "durationSec": 12
   }
 ]
 
@@ -383,9 +462,10 @@ Important: Return ONLY the JSON array, no markdown, no explanation.`;
                     visualDescription: { type: "string" },
                     dialogue: { type: "string" },
                     characters: { type: "string" },
-                    emotion: { type: "string" },
-                  },
-                  required: ["shotNumber", "sceneName", "shotType", "visualDescription", "dialogue", "characters", "emotion"],
+                  emotion: { type: "string" },
+                  durationSec: { type: "integer" },
+                },
+                  required: ["shotNumber", "sceneName", "shotType", "visualDescription", "dialogue", "characters", "emotion", "durationSec"],
                   additionalProperties: false,
                 },
               },
@@ -395,7 +475,7 @@ Important: Return ONLY the JSON array, no markdown, no explanation.`;
 
         let shots: Array<{
           shotNumber: number; sceneName: string; shotType: string;
-          visualDescription: string; dialogue: string; characters: string; emotion: string;
+          visualDescription: string; dialogue: string; characters: string; emotion: string; durationSec?: number;
         }>;
         try {
           shots = JSON.parse(response);
@@ -422,6 +502,7 @@ Important: Return ONLY the JSON array, no markdown, no explanation.`;
               dialogue: s.dialogue,
               characters: s.characters,
               emotion: s.emotion,
+              videoDuration: Math.max(4, Math.min(15, s.durationSec ?? 12)),
               status: "draft" as const,
             }))
           );
@@ -1151,7 +1232,6 @@ Return ONLY the prompt text.`,
       );
       if (!project) throw new Error("Project not found");
 
-      // 获取少量剧情背景
       const shots = await db!.select({
         sceneName: scriptShots.sceneName,
         visualDescription: scriptShots.visualDescription,
@@ -1162,65 +1242,77 @@ Return ONLY the prompt text.`,
       const scriptSummary = shots.map(s =>
         `场景：${s.sceneName ?? ""} | 人物：${s.characters ?? ""} | 描述：${(s.visualDescription ?? "").slice(0, 80)}`
       ).join("\n");
-      const scriptContext = scriptSummary ? `\n\n【剧情背景】\n${scriptSummary}` : "";
 
-      const styleMap: Record<string, string> = {
-        realistic: "photorealistic, cinematic, real human, 8K, film grain",
-        animation: "2D animation style, cel-shaded, vibrant colors",
-        cg: "3D CGI render, Unreal Engine 5, hyper-detailed",
-      };
-      const styleZh: Record<string, string> = {
-        realistic: "写实电影风格，真实人物，8K 高清，电影感光影",
-        animation: "2D 动画风格，赛璐璐着色，鲜艳色彩",
-        cg: "3D CGI 渲染，虚幻引擎5，超精细",
-      };
-      const styleKw = styleMap[project.style] ?? "photorealistic";
-      const styleZhKw = styleZh[project.style] ?? "写实电影风格";
+      const res = await callLLM({
+        systemPrompt: ASSET_PROMPT_SYSTEM,
+        prompt: `请为这个已存在资产重写一条稳定、可编辑、可复用的中文资产提示词。
 
-      let systemPrompt = "";
-      let userPrompt = "";
+资产类型：${asset.type}
+资产名称：${asset.name}
+现有描述：
+${asset.description || "未填写"}
 
-      if (asset.type === "character") {
-        systemPrompt = `你是专业的影视美术设计师，精通角色设定和 Midjourney 提示词写作。请用叙事描述式风格生成提示词，不要关键词堆叠。输出纯文本英文提示词，可直接用于 Midjourney v7。`;
-             userPrompt = `请为以下角色生成一个完整的 Midjourney v7 英文提示词，用于生成竖版（9:16）单人全身形象参考图。
+项目定义：
+${project.definition || "未填写"}
 
-角色名：${asset.name}
-描述：${asset.description ?? "(无)"}
-整体风格：${styleZhKw}${scriptContext}
+项目圣经：
+${project.projectBible || "未生成"}
 
-要求：
-- 叙事描述式，不要关键词堆叠
-- 包含：年龄感、五官细节（眼型/鼻型/嘴型/肤色）、体型、发型/发色、服装款式/颜色/材质、配饰、整体气质
-- 单人全身正面站姿，深灰色渐变背景，面部清晰可见，电影感光影
-- 无文字，无水印，无其他人物
-- 风格：${styleKw}
-- 英文提示词末尾加上：--ar 9:16 --style raw --q 2
-- 仅输出英文提示词，不要解释`;
-      } else if (asset.type === "scene") {
-        systemPrompt = `你是专业的影视美术设计师，精通场景设计和 Midjourney 提示词写作。请用叙事描述式风格生成提示词，不要关键词堆叠。输出纯文本英文提示词，可直接用于 Midjourney v7。`;
-        userPrompt = `请为以下场景生成一个完整的 Midjourney v7 英文提示词，用于生成场景参考图（16:9 横屏，无人物，4K，真实感）。
+摄影风格锁定：
+${resolveProjectVisualStyle(project)}
 
-场景名：${asset.name}
-描述：${asset.description ?? "(无)"}
-整体风格：${styleZhKw}${scriptContext}
+剧情背景：
+${scriptSummary || "暂无分镜背景"}
 
-要求：
-- 叙事描述式，不要关键词堆叠
-- 包含：视角（建立镜头/俯拍/平视）、空间布局、光源与光线方向、色调、关键家具/物件、氛围情绪
-- 融合为流畅段落，像描述一个电影画面
-- 无人物，专注于场景本身，真实感强，非CG风格，photorealistic
-- 16:9 横屏，establishing shot，4K，无文字，无水印
-- 风格：${styleKw}
-- 英文提示词末尾加上：--ar 16:9 --style raw --q 2
-- 仅输出英文提示词，不要解释`;
-      } else {
-        throw new Error(`Unsupported asset type: ${asset.type}`);
-      }
-      const res = await callLLM({ systemPrompt, prompt: userPrompt });
-      const rawContent = res;
-      const mjPrompt = (typeof rawContent === "string" ? rawContent : "").trim();
+只输出 JSON，assets 数组里只放这一个资产。`,
+        responseFormat: {
+          type: "json_schema",
+          json_schema: {
+            name: "single_asset_prompt",
+            strict: true,
+            schema: {
+              type: "object",
+              properties: {
+                assets: {
+                  type: "array",
+                  minItems: 1,
+                  maxItems: 1,
+                  items: {
+                    type: "object",
+                    properties: {
+                      type: { type: "string", enum: ["character", "scene", "costume", "prop", "custom"] },
+                      name: { type: "string" },
+                      status: { type: "string", enum: ["confirmed", "needs_user_input"] },
+                      priority: { type: "string", enum: ["high", "medium", "low"] },
+                      mainWeight: { type: "string" },
+                      supportingWeight: { type: "string" },
+                      assetPrompt: { type: "string" },
+                      continuityRule: { type: "string" },
+                      variationRule: { type: "string" },
+                      usedInEpisodes: { type: "string" },
+                      conflictCheck: { type: "string" },
+                    },
+                    required: ["type", "name", "status", "priority", "mainWeight", "supportingWeight", "assetPrompt", "continuityRule", "variationRule", "usedInEpisodes", "conflictCheck"],
+                    additionalProperties: false,
+                  },
+                },
+              },
+              required: ["assets"],
+              additionalProperties: false,
+            },
+          },
+        },
+      });
+      const parsed = JSON.parse(res) as { assets: Array<{ assetPrompt: string; mainWeight: string; supportingWeight: string; continuityRule: string; variationRule: string; conflictCheck: string; priority: string; status: string; usedInEpisodes: string }> };
+      const next = parsed.assets[0];
+      const mjPrompt = next.assetPrompt.trim();
       if (mjPrompt) {
-        await db!.update(overseasAssets).set({ mjPrompt, stylePrompt: mjPrompt }).where(eq(overseasAssets.id, asset.id));
+        await db!.update(overseasAssets).set({
+          description: [next.mainWeight, next.supportingWeight, `连续性：${next.continuityRule}`, `变化规则：${next.variationRule}`, `待确认：${next.conflictCheck}`].join("\n"),
+          mjPrompt,
+          stylePrompt: mjPrompt,
+          tags: `${next.priority},${next.status},${next.usedInEpisodes}`,
+        }).where(eq(overseasAssets.id, asset.id));
       }
       return { assetId: asset.id, mjPrompt };
     }),
@@ -1623,20 +1715,25 @@ ${input.scriptText.slice(0, 120000)}
           try {
             const aspectLabel = project.aspectRatio === "portrait" ? "vertical 9:16" : "horizontal 16:9";
             const langLabel = language === "en" ? "English" : language === "zh" ? "Chinese" : language;
+            const visualStyle = resolveProjectVisualStyle(project);
 
-            const systemPrompt = `You are a professional short drama director and script breakdown specialist.
-Your task is to analyze a short drama script and break it down into individual shots for AI video generation.
+            const systemPrompt = `You are a professional film director, performance coach, and AI video shot breakdown specialist.
+Break the script into shots for a premium Seedance 2.0 workflow.
 
 Rules:
-- Generate 20-30 shots per episode maximum. Do NOT invent shots not in the script.
-- Each shot should be 4-8 seconds of video content
+- Do not invent events not in the script.
+- Do not force fixed shot duration.
+- Each shot should usually be 6-15 seconds. Choose duration by dialogue length, action complexity, performance pauses, and visual density.
+- One shot = one main dramatic task. Split if dialogue is too long, action is too dense, or multiple characters all need focus.
+- Dialogue shots need pauses, tone, subtext, and reaction time. Chinese normal speed is 4-6 characters/sec; restrained speech is 2.5-4 characters/sec; argument can be 6-8 characters/sec.
+- Performance must include negative space: hesitation, breath, gaze shift, small hand movement, silence before or after a line.
+- Visual descriptions must use visible actions, composition, camera, lighting, material, atmosphere, and continuity constraints.
 - All dialogue/narration must be in ${langLabel}
-- Visual descriptions must be detailed enough for AI image generation
-- Style: ${project.style}
 - Aspect ratio: ${aspectLabel}
-- Genre: ${project.genre}
-- NO background music, NO subtitles in visual descriptions
-- Strictly follow the script content`;
+- Project bible: ${project.projectBible || "not yet generated"}
+- Visual style lock:
+${visualStyle}
+- NO subtitles in visual descriptions.`;
 
             const userPrompt = `Analyze this Episode ${ep.episodeNumber} script and generate a shot breakdown:
 
@@ -1648,10 +1745,11 @@ Return a JSON array of shots with this exact schema:
     "shotNumber": 1,
     "sceneName": "Scene name",
     "shotType": "close_up|medium|wide|extreme_close|aerial|over_shoulder",
-    "visualDescription": "Detailed English description for AI image generation.",
+    "visualDescription": "中文分镜画面设计：主体、动作、空间、摄影机位置、光影、空气介质、材质、表演留白和连续性约束。",
     "dialogue": "Character dialogue in ${langLabel}, or empty string",
     "characters": "comma-separated character names",
-    "emotion": "tense|romantic|dramatic|comedic|mysterious|action|sad|happy"
+    "emotion": "emotional tone plus performance subtext",
+    "durationSec": 12
   }
 ]
 
@@ -1661,7 +1759,7 @@ Return ONLY the JSON array.`;
 
             let shots: Array<{
               shotNumber: number; sceneName: string; shotType: string;
-              visualDescription: string; dialogue: string; characters: string; emotion: string;
+              visualDescription: string; dialogue: string; characters: string; emotion: string; durationSec?: number;
             }>;
             try {
               const cleaned = response.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
@@ -1682,7 +1780,10 @@ Return ONLY the JSON array.`;
                   projectId, userId: ctx.user.id, episodeNumber: ep.episodeNumber,
                   shotNumber: s.shotNumber, sceneName: s.sceneName, shotType: s.shotType,
                   visualDescription: s.visualDescription, dialogue: s.dialogue,
-                  characters: s.characters, emotion: s.emotion, status: "draft" as const,
+                  characters: s.characters,
+                  emotion: s.emotion,
+                  videoDuration: Math.max(4, Math.min(15, s.durationSec ?? 12)),
+                  status: "draft" as const,
                 }))
               );
             }
@@ -1714,142 +1815,64 @@ Return ONLY the JSON array.`;
         .where(and(eq(overseasProjects.id, projectId), eq(overseasProjects.userId, ctx.user.id)));
       if (!project) throw new Error("Project not found");
 
-      const prompt = `你是一位专业的影视制作人和剧本分析师。请仔细阅读以下真人短剧剧本，进行结构化分析。
+      const response = await callLLM({
+        systemPrompt: ASSET_PROMPT_SYSTEM,
+        prompt: `项目定义：
+${project.definition || "未填写"}
 
-【分析规则】
-1. 集数识别：
-   - 忽略剧本开头的简介、序言、人物介绍、世界观说明等非正文内容
-   - 从第一个真正的故事集数开始（通常是EP-01或第一集正文）
-   - 每集提取：集数编号、标题、时长（分钟）、剧情简介（100字内）
+项目圣经：
+${project.projectBible || "未生成"}
 
-2. 人物识别（全局，不分集）：
-   - 只提取真实的角色名，包括所有有名字的人物
-   - 严格排除：场景说明、舞台指示、"出场人物"、"一卡"、"旁白"、"解说"、"画外音"、"字幕"等非角色词
-   - 同一角色去重，不要出现"张三（快乐）"和"张三（悲伤）"这样的重复，只保留"张三"
-   - 每个角色分析：姓名、角色定位（主角/配角/反派等）、外貌特征（肤色/发型/发色/脸型/眼睛/体型/年龄感等）、服装特征、性格特点
+摄影风格锁定：
+${resolveProjectVisualStyle(project)}
 
-3. 场景识别（全局）：
-   - 提取所有主要场景：场景名称、环境类型（室内/室外）、时间（白天/夜晚/黄昏/清晨）、氛围描述、视觉特征
-
-4. 道具识别（全局）：
-   - 提取重要道具：名称、外观描述、材质、用途
-   - 道具范围包括：实体道具（武器、容器、工具等）和界面类道具（屏幕显示器、控制台、手机界面等）
-
-【剧本内容】
+剧本：
 ${scriptText.slice(0, 80000)}
 
-【输出格式】严格输出以下JSON结构，不要有任何额外说明：
-{
-  "episodes": [
-    {
-      "id": "ep01",
-      "number": 1,
-      "title": "集数标题",
-      "duration": 5,
-      "synopsis": "剧情简介"
-    }
-  ],
-  "characters": [
-    {
-      "name": "角色名",
-      "role": "主角/配角/反派/其他",
-      "appearance": "详细外貌：肤色、发型、发色、脸型、眼睛、体型、年龄感等",
-      "costume": "服装描述：颜色、款式、材质、特殊标志等",
-      "marks": "特殊标记：伤疤、纹身、特殊装备等（无则留空）",
-      "personality": "性格特点（简短）"
-    }
-  ],
-  "scenes": [
-    {
-      "name": "场景名称",
-      "environment": "室内/室外",
-      "timeOfDay": "白天/夜晚/黄昏/清晨",
-      "atmosphere": "氛围描述，如：紧张压抑、温暖宁静",
-      "visualFeatures": "视觉特征描述，如：霓虹灯光、废墟废墟、金属质感"
-    }
-  ],
-  "props": [
-    {
-      "name": "道具名称",
-      "appearance": "外观描述",
-      "material": "材质",
-      "purpose": "用途"
-    }
-  ]
-}`;
-
-      const response = await callLLM({
-        prompt,
+请提取人物、场景、服化道、道具和自定义资产，并输出 JSON。`,
         responseFormat: {
           type: "json_schema",
           json_schema: {
-            name: "script_analysis",
+            name: "asset_prompt_analysis",
             strict: true,
             schema: {
               type: "object",
               properties: {
-                episodes: {
+                assets: {
                   type: "array",
                   items: {
                     type: "object",
                     properties: {
-                      id: { type: "string" },
-                      number: { type: "integer" },
-                      title: { type: "string" },
-                      duration: { type: "integer" },
-                      synopsis: { type: "string" },
-                    },
-                    required: ["id", "number", "title", "duration", "synopsis"],
-                    additionalProperties: false,
-                  },
-                },
-                characters: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
+                      type: { type: "string", enum: ["character", "scene", "costume", "prop", "custom"] },
                       name: { type: "string" },
-                      role: { type: "string" },
-                      appearance: { type: "string" },
-                      costume: { type: "string" },
-                      marks: { type: "string" },
-                      personality: { type: "string" },
+                      status: { type: "string", enum: ["confirmed", "needs_user_input"] },
+                      priority: { type: "string", enum: ["high", "medium", "low"] },
+                      mainWeight: { type: "string" },
+                      supportingWeight: { type: "string" },
+                      assetPrompt: { type: "string" },
+                      continuityRule: { type: "string" },
+                      variationRule: { type: "string" },
+                      usedInEpisodes: { type: "string" },
+                      conflictCheck: { type: "string" },
                     },
-                    required: ["name", "role", "appearance", "costume", "marks", "personality"],
-                    additionalProperties: false,
-                  },
-                },
-                scenes: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      name: { type: "string" },
-                      environment: { type: "string" },
-                      timeOfDay: { type: "string" },
-                      atmosphere: { type: "string" },
-                      visualFeatures: { type: "string" },
-                    },
-                    required: ["name", "environment", "timeOfDay", "atmosphere", "visualFeatures"],
-                    additionalProperties: false,
-                  },
-                },
-                props: {
-                  type: "array",
-                  items: {
-                    type: "object",
-                    properties: {
-                      name: { type: "string" },
-                      appearance: { type: "string" },
-                      material: { type: "string" },
-                      purpose: { type: "string" },
-                    },
-                    required: ["name", "appearance", "material", "purpose"],
+                    required: [
+                      "type",
+                      "name",
+                      "status",
+                      "priority",
+                      "mainWeight",
+                      "supportingWeight",
+                      "assetPrompt",
+                      "continuityRule",
+                      "variationRule",
+                      "usedInEpisodes",
+                      "conflictCheck",
+                    ],
                     additionalProperties: false,
                   },
                 },
               },
-              required: ["episodes", "characters", "scenes", "props"],
+              required: ["assets"],
               additionalProperties: false,
             },
           },
@@ -1858,10 +1881,19 @@ ${scriptText.slice(0, 80000)}
 
       const content = response;
       const parsed = JSON.parse(content) as {
-        episodes: Array<{ id: string; number: number; title: string; duration: number; synopsis: string }>;
-        characters: Array<{ name: string; role: string; appearance: string; costume: string; marks: string; personality: string }>;
-        scenes: Array<{ name: string; environment: string; timeOfDay: string; atmosphere: string; visualFeatures: string }>;
-        props: Array<{ name: string; appearance: string; material: string; purpose: string }>;
+        assets: Array<{
+          type: "character" | "scene" | "costume" | "prop" | "custom";
+          name: string;
+          status: "confirmed" | "needs_user_input";
+          priority: "high" | "medium" | "low";
+          mainWeight: string;
+          supportingWeight: string;
+          assetPrompt: string;
+          continuityRule: string;
+          variationRule: string;
+          usedInEpisodes: string;
+          conflictCheck: string;
+        }>;
       };
 
       // 获取已有资产名称，避免重复
@@ -1872,40 +1904,38 @@ ${scriptText.slice(0, 80000)}
       const created: Array<{ id: number; name: string; type: string }> = [];
       const skipped: string[] = [];
 
-      // 导入人物
-      for (const char of parsed.characters) {
-        if (existingNames.has(char.name.toLowerCase())) { skipped.push(char.name); continue; }
-        const description = `${char.appearance}。服装：${char.costume}${char.marks ? `。特征：${char.marks}` : ""}。性格：${char.personality}`;
+      for (const asset of parsed.assets) {
+        const normalizedName = asset.name.toLowerCase();
+        if (existingNames.has(normalizedName)) { skipped.push(asset.name); continue; }
+        const description = [
+          asset.mainWeight,
+          asset.supportingWeight,
+          `连续性：${asset.continuityRule}`,
+          asset.variationRule ? `变化规则：${asset.variationRule}` : "",
+          asset.conflictCheck ? `待确认：${asset.conflictCheck}` : "",
+        ].filter(Boolean).join("\n");
         const [result] = await db!.insert(overseasAssets).values({
           projectId, userId: ctx.user.id,
-          type: "character", name: char.name,
-          description, tags: char.role,
+          type: asset.type,
+          name: asset.name,
+          description,
+          mjPrompt: asset.assetPrompt,
+          stylePrompt: asset.assetPrompt,
+          tags: `${asset.priority},${asset.status},${asset.usedInEpisodes}`,
         });
-        created.push({ id: (result as any).insertId, name: char.name, type: "character" });
-        existingNames.add(char.name.toLowerCase());
-      }
-
-      // 导入场景
-      for (const scene of parsed.scenes) {
-        if (existingNames.has(scene.name.toLowerCase())) { skipped.push(scene.name); continue; }
-        const description = `${scene.environment}，${scene.timeOfDay}。氛围：${scene.atmosphere}。视觉特征：${scene.visualFeatures}`;
-        const [result] = await db!.insert(overseasAssets).values({
-          projectId, userId: ctx.user.id,
-          type: "scene", name: scene.name,
-          description, tags: `${scene.environment},${scene.timeOfDay}`,
-        });
-        created.push({ id: (result as any).insertId, name: scene.name, type: "scene" });
-        existingNames.add(scene.name.toLowerCase());
+        created.push({ id: (result as any).insertId, name: asset.name, type: asset.type });
+        existingNames.add(normalizedName);
       }
 
       return {
-        episodes: parsed.episodes,
         created,
         skipped,
         addedCount: created.length,
         characters: created.filter(a => a.type === "character").length,
         scenes: created.filter(a => a.type === "scene").length,
-        props: 0,
+        costumes: created.filter(a => a.type === "costume").length,
+        props: created.filter(a => a.type === "prop").length,
+        custom: created.filter(a => a.type === "custom").length,
       };
     }),
 
@@ -2449,7 +2479,15 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
 
       const prompt = input.prompt?.trim() || await generateStoryboardSketchPrompt(
         shotToInfo(shot, shot.videoDuration ?? 15),
-        project.style
+        resolveProjectVisualStyle(project),
+        {
+          projectDefinition: project.definition,
+          projectBible: project.projectBible,
+          visualStylePreset: project.visualStylePreset,
+          styleEnhancers: parseStyleEnhancers(project.styleEnhancers),
+          visualStylePrompt: resolveProjectVisualStyle(project),
+          aspectRatio: project.aspectRatio === "portrait" ? "9:16" : "16:9",
+        }
       );
       const aspectRatio = project.aspectRatio === "landscape" ? "16:9" : "9:16";
       const { url } = await generateImage({
@@ -2492,6 +2530,11 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
         .from(scriptShots)
         .where(and(eq(scriptShots.id, input.shotId), eq(scriptShots.userId, ctx.user.id)));
       if (!shot) throw new Error("Shot not found");
+      const [project] = await db!
+        .select()
+        .from(overseasProjects)
+        .where(and(eq(overseasProjects.id, shot.projectId), eq(overseasProjects.userId, ctx.user.id)));
+      if (!project) throw new Error("Project not found");
 
       let assets = await db!.select().from(overseasAssets).where(
         and(eq(overseasAssets.projectId, shot.projectId), eq(overseasAssets.userId, ctx.user.id))
@@ -2512,7 +2555,15 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
 
       const prompt = await generateSeedance2Prompt(
         shotToInfo(shot, input.duration),
-        referenceImages
+        referenceImages,
+        {
+          projectDefinition: project.definition,
+          projectBible: project.projectBible,
+          visualStylePreset: project.visualStylePreset,
+          styleEnhancers: parseStyleEnhancers(project.styleEnhancers),
+          visualStylePrompt: resolveProjectVisualStyle(project),
+          aspectRatio: project.aspectRatio === "portrait" ? "9:16" : "16:9",
+        }
       );
       const referenceImageUrls = referenceImages.map((item) => item.url);
 
@@ -2547,12 +2598,21 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
 
       const prompt = input.prompt?.trim() || await generateCameraDiagramPrompt(
         shotToInfo(shot, shot.videoDuration ?? 15),
-        shot.videoPrompt ?? undefined
+        shot.videoPrompt ?? undefined,
+        {
+          projectDefinition: project.definition,
+          projectBible: project.projectBible,
+          visualStylePreset: project.visualStylePreset,
+          styleEnhancers: parseStyleEnhancers(project.styleEnhancers),
+          visualStylePrompt: resolveProjectVisualStyle(project),
+          aspectRatio: project.aspectRatio === "portrait" ? "9:16" : "16:9",
+        }
       );
+      const aspectRatio = project.aspectRatio === "landscape" ? "16:9" : "9:16";
       const { url } = await generateImage({
         prompt,
         engine: toImageEngine(input.imageEngine),
-        aspectRatio: "16:9",
+        aspectRatio,
         s3KeyPrefix: `premium-camera-diagrams/${ctx.user.id}/${shot.projectId}`,
       });
 

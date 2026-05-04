@@ -13,9 +13,9 @@ import {
   generateSeedreamImage,
   generateMJImageAndWait,
   generateNanoBananaImage,
+  generateGPTImage2,
   type SeedreamModel,
 } from "../lib/vectorengine";
-import { generateImage as generateImage2 } from "../_core/imageGeneration";
 import { storagePut } from "../storage";
 
 // ─── 引擎类型 ──────────────────────────────────────────────────────────────────
@@ -78,12 +78,10 @@ export async function generateImage(options: GenerateImageOptions): Promise<Gene
   let taskId = "";
 
   if (engine === "image2") {
-    const result = await generateImage2({
+    rawUrl = await generateGPTImage2({
       prompt,
-      originalImages: referenceImageUrl ? [{ url: referenceImageUrl }] : [],
+      aspectRatio,
     });
-    if (!result.url) throw new Error("image2: no URL returned");
-    return { url: result.url, taskId: "image2" };
   } else if (engine === "midjourney") {
     rawUrl = await generateMJImageAndWait({ prompt, referenceImageUrl });
   } else if (engine === "nano-banana-pro") {

@@ -4,6 +4,12 @@ import { z } from "zod";
 import { COOKIE_NAME } from "../../shared/const";
 import { getSessionCookieOptions } from "../_core/cookies";
 import { ENV } from "../_core/env";
+import {
+  createInternalAccessToken,
+  hasInternalAccessPassword,
+  INTERNAL_ACCESS_COOKIE,
+  validateInternalPassword,
+} from "../_core/internalAccess";
 import { sdk } from "../_core/sdk";
 import { publicProcedure, protectedProcedure, router } from "../_core/trpc";
 import * as db from "../db";
@@ -22,6 +28,28 @@ function detectIdentifierType(identifier: string): "email" | "phone" {
 }
 
 export const authRouter = router({
+  /** 内部访问密码登录：第一版不启用账号系统 */
+  internalLogin: publicProcedure
+    .input(z.object({ password: z.string().min(1, "请输入访问密码") }))
+    .mutation(({ input, ctx }) => {
+      if (!hasInternalAccessPassword()) {
+        throw new TRPCError({ code: "PRECONDITION_FAILED", message: "服务器未配置内部访问密码" });
+      }
+      if (!validateInternalPassword(input.password)) {
+        throw new TRPCError({ code: "UNAUTHORIZED", message: "访问密码错误" });
+      }
+      const cookieOptions = getSessionCookieOptions(ctx.req);
+      ctx.res.cookie(INTERNAL_ACCESS_COOKIE, createInternalAccessToken(), {
+        ...cookieOptions,
+        maxAge: ONE_YEAR_MS,
+      });
+      return { success: true } as const;
+    }),
+
+  internalStatus: publicProcedure.query(() => {
+    return { configured: hasInternalAccessPassword() } as const;
+  }),
+
   /** 注册 */
   register: publicProcedure
     .input(z.object({
@@ -144,6 +172,7 @@ export const authRouter = router({
   logout: publicProcedure.mutation(({ ctx }) => {
     const cookieOptions = getSessionCookieOptions(ctx.req);
     ctx.res.clearCookie(COOKIE_NAME, { ...cookieOptions, maxAge: -1 });
+    ctx.res.clearCookie(INTERNAL_ACCESS_COOKIE, { ...cookieOptions, maxAge: -1 });
     return { success: true } as const;
   }),
 

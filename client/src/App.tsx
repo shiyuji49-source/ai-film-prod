@@ -7,20 +7,15 @@ import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { ProjectManagerProvider } from "./contexts/ProjectManagerContext";
 import { ProjectProvider } from "./contexts/ProjectContext";
-import AdminPage from "./pages/AdminPage";
-import CreditsPage from "./pages/CreditsPage";
-import AuthPage from "./pages/AuthPage";
-import OverseasWorkflow from "./pages/OverseasWorkflow";
+import PremiumStudio from "./pages/PremiumStudio";
 
 function Router() {
   return (
     <Switch>
-      <Route path={"/"} component={OverseasWorkflow} />
-      <Route path={"/admin"} component={AdminPage} />
-      <Route path={"/credits"} component={CreditsPage} />
-      <Route path={"/assets"} component={OverseasWorkflow} />
-      <Route path={"/overseas"} component={OverseasWorkflow} />
-      <Route path={"/auth"}>{() => <AuthPage />}</Route>
+      <Route path={"/"} component={PremiumStudio} />
+      <Route path={"/auth"} component={PremiumStudio} />
+      <Route path={"/assets"} component={PremiumStudio} />
+      <Route path={"/overseas"} component={PremiumStudio} />
       <Route path={"/404"} component={NotFound} />
       <Route component={NotFound} />
     </Switch>

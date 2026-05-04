@@ -215,6 +215,63 @@ export async function generateMJImageAndWait(options: {
 }
 
 // ============================================================
+// GPT Image 2 (via VectorEngine OpenAI-compatible image API)
+// ============================================================
+
+export async function generateGPTImage2(options: {
+  prompt: string;
+  aspectRatio?: "16:9" | "9:16" | "1:1" | "3:4" | "4:3";
+  timeoutMs?: number;
+}): Promise<string> {
+  const sizeByRatio: Record<string, string> = {
+    "16:9": "1536x1024",
+    "9:16": "1024x1536",
+    "1:1": "1024x1024",
+    "3:4": "1024x1536",
+    "4:3": "1536x1024",
+  };
+  const bodyBase = {
+    model: "gpt-image-2",
+    prompt: options.prompt,
+    size: sizeByRatio[options.aspectRatio ?? "9:16"] ?? "1024x1536",
+  };
+
+  const url = `${getBaseUrl()}/v1/images/generations`;
+  const headers = {
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${getApiKey()}`,
+  };
+
+  let lastError = "";
+  for (const body of [
+    { ...bodyBase, response_format: "url" },
+    bodyBase,
+  ]) {
+    const res = await fetch(url, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(options.timeoutMs ?? 180000),
+    });
+
+    if (!res.ok) {
+      lastError = await res.text();
+      continue;
+    }
+
+    const data = await res.json();
+    const item = data.data?.[0];
+    if (item?.url) return item.url;
+    if (item?.b64_json) return `data:image/png;base64,${item.b64_json}`;
+    if (data.url) return data.url;
+    if (data.b64_json) return `data:image/png;base64,${data.b64_json}`;
+    throw new Error("gpt-image-2: no image returned");
+  }
+
+  throw new Error(`gpt-image-2 error: ${lastError || "request failed"}`);
+}
+
+// ============================================================
 // Seedream (豆包图片生成)
 // 注意：豆包模型必须直接调用火山引擎 ARK API，禁止通过 VectorEngine 代理调用豆包模型
 // ============================================================

@@ -36,6 +36,13 @@
       "when": 1774924800000,
       "tag": "0004_premium_local_workflow",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1775011200000,
+      "tag": "0005_visual_style_bible",
+      "breakpoints": true
     }
   ]
 }

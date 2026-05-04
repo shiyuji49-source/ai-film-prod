@@ -169,6 +169,11 @@ export const overseasProjects = mysqlTable("overseas_projects", {
   aspectRatio: mysqlEnum("aspectRatio", ["landscape", "portrait"]).notNull().default("portrait"),
   style: mysqlEnum("style", ["realistic", "animation", "cg"]).notNull().default("realistic"),
   genre: varchar("genre", { length: 64 }).notNull().default("romance"),
+  visualStylePreset: varchar("visualStylePreset", { length: 64 }).notNull().default("natural_practical_light"),
+  /** 用户选择的摄影风格增强标签 JSON 数组 */
+  styleEnhancers: text("styleEnhancers"),
+  visualStylePrompt: text("visualStylePrompt"),
+  projectBible: text("projectBible"),
   totalEpisodes: int("totalEpisodes").default(20),
   status: mysqlEnum("status", ["draft", "in_progress", "completed"]).default("draft").notNull(),
   characters: text("characters").default("[]"),
