@@ -6,21 +6,33 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import {
-  ArrowLeft,
+  Archive,
+  ArrowUp,
+  AtSign,
   Boxes,
   Camera,
   Check,
+  ChevronRight,
   Clapperboard,
+  Clock,
   Copy,
+  Database,
   FileText,
   Film,
+  FolderOpen,
+  GalleryHorizontal,
   ImageIcon,
   KeyRound,
   Layers,
   Loader2,
+  Lock,
   Play,
   Plus,
+  RefreshCw,
   Save,
+  Search,
+  Send,
+  Settings2,
   Sparkles,
   Trash2,
   Upload,
@@ -35,19 +47,21 @@ import {
 } from "@shared/visualStyles";
 
 const C = {
-  bg: "oklch(0.12 0.004 80)",
-  band: "oklch(0.16 0.006 80)",
-  panel: "oklch(0.19 0.008 80)",
-  panel2: "oklch(0.23 0.01 85)",
-  line: "oklch(0.32 0.01 85)",
-  line2: "oklch(0.42 0.012 85)",
-  text: "oklch(0.94 0.006 80)",
-  sub: "oklch(0.72 0.012 95)",
-  dim: "oklch(0.55 0.012 95)",
-  gold: "oklch(0.80 0.15 76)",
-  blue: "oklch(0.68 0.13 235)",
-  green: "oklch(0.72 0.16 155)",
-  rose: "oklch(0.70 0.18 20)",
+  app: "#f7f7f4",
+  side: "#fbfaf7",
+  panel: "#ffffff",
+  panelSoft: "#f1f0eb",
+  line: "#e5e1d8",
+  lineStrong: "#d1cabe",
+  text: "#26262b",
+  sub: "#6f706f",
+  dim: "#a3a19b",
+  gold: "#a87a2b",
+  purple: "#7c5cff",
+  purpleSoft: "#f1edff",
+  green: "#2f9b68",
+  red: "#c84b42",
+  ink: "#141414",
 };
 
 type Project = {
@@ -73,13 +87,19 @@ type Asset = {
   type: AssetType;
   name: string;
   description: string | null;
-  mjPrompt: string | null;
   stylePrompt: string | null;
+  mjPrompt: string | null;
   referenceImageUrl: string | null;
   mainImageUrl: string | null;
   mjImageUrl: string | null;
+  styleImageUrl: string | null;
+  viewFrontUrl: string | null;
+  viewSideUrl: string | null;
+  viewBackUrl: string | null;
   viewCloseUpUrl: string | null;
   multiAngleGridUrl: string | null;
+  tags: string | null;
+  isGlobalRef: boolean;
 };
 
 type Shot = {
@@ -111,54 +131,92 @@ type SplitEpisode = {
   scriptText: string;
 };
 
-type TabKey = "definition" | "script" | "assets" | "storyboard" | "video";
+type ModuleKey = "definition" | "script" | "rules" | "assets" | "shots" | "records";
 
-const tabs: Array<{ key: TabKey; label: string; icon: ReactNode }> = [
-  { key: "definition", label: "项目定义", icon: <Film size={15} /> },
-  { key: "script", label: "剧本分集", icon: <FileText size={15} /> },
-  { key: "assets", label: "资产库", icon: <Boxes size={15} /> },
-  { key: "storyboard", label: "分镜草图", icon: <ImageIcon size={15} /> },
-  { key: "video", label: "视频生成", icon: <Play size={15} /> },
-];
-
-const assetLabel: Record<AssetType, string> = {
-  character: "演员",
-  scene: "场景",
-  prop: "道具",
-  costume: "服化道",
-  storyboard: "分镜草图",
-  camera_diagram: "机位图",
-  custom: "自定义",
+type VideoSegment = {
+  id: string;
+  episodeNumber: number;
+  segmentNumber: number;
+  duration: number;
+  shots: Shot[];
 };
 
-function panel(style?: CSSProperties): CSSProperties {
+const navItems: Array<{ key: ModuleKey; label: string; icon: ReactNode }> = [
+  { key: "definition", label: "项目定义", icon: <Film size={16} /> },
+  { key: "script", label: "剧本分集", icon: <FileText size={16} /> },
+  { key: "rules", label: "导演规则", icon: <Lock size={16} /> },
+  { key: "assets", label: "资产库", icon: <Boxes size={16} /> },
+  { key: "shots", label: "镜头工作台", icon: <Clapperboard size={16} /> },
+  { key: "records", label: "生成记录", icon: <Archive size={16} /> },
+];
+
+const assetLabel: Record<AssetType | "all" | "user_upload" | "video_frame", string> = {
+  all: "全部",
+  character: "人物",
+  scene: "场景",
+  costume: "服装",
+  prop: "道具",
+  storyboard: "分镜草图",
+  camera_diagram: "机位图",
+  custom: "用户上传",
+  user_upload: "用户上传",
+  video_frame: "视频帧",
+};
+
+function card(style?: CSSProperties): CSSProperties {
   return {
     background: C.panel,
     border: `1px solid ${C.line}`,
     borderRadius: 8,
+    boxShadow: "0 1px 2px rgba(20,20,20,0.03)",
     ...style,
   };
 }
 
 function field(): CSSProperties {
   return {
-    background: C.band,
+    background: "#fff",
     borderColor: C.line,
     color: C.text,
+    borderRadius: 8,
   };
 }
 
-function fileToBase64(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
+function tinyLabel(color = C.sub): CSSProperties {
+  return { color, fontSize: 12, lineHeight: 1.45 };
+}
+
+function pill(active = false): CSSProperties {
+  return {
+    border: `1px solid ${active ? C.purple : C.line}`,
+    background: active ? C.purpleSoft : C.panel,
+    color: active ? C.purple : C.sub,
+    borderRadius: 999,
+    padding: "6px 10px",
+    fontSize: 12,
+    lineHeight: 1,
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+  };
 }
 
 function assetImage(asset: Asset) {
-  return asset.referenceImageUrl || asset.viewCloseUpUrl || asset.mainImageUrl || asset.multiAngleGridUrl || asset.mjImageUrl;
+  return (
+    asset.referenceImageUrl ||
+    asset.viewCloseUpUrl ||
+    asset.mainImageUrl ||
+    asset.multiAngleGridUrl ||
+    asset.viewFrontUrl ||
+    asset.mjImageUrl ||
+    asset.styleImageUrl ||
+    null
+  );
+}
+
+function assetTag(asset: Asset) {
+  const prefix = asset.type === "storyboard" ? "分镜" : asset.type === "camera_diagram" ? "机位" : asset.name;
+  return `@${prefix.replace(/\s+/g, "")}`;
 }
 
 function parseStyleEnhancers(value?: string | null): string[] {
@@ -170,6 +228,59 @@ function parseStyleEnhancers(value?: string | null): string[] {
     return value.split(",").map((item) => item.trim()).filter(Boolean).slice(0, 5);
   }
   return [];
+}
+
+function fileToBase64(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+function copy(text?: string | null) {
+  if (!text) return;
+  navigator.clipboard.writeText(text);
+  toast.success("已复制");
+}
+
+function buildSegments(shots: Shot[]): VideoSegment[] {
+  const byEpisode = new Map<number, Shot[]>();
+  for (const shot of shots) {
+    const list = byEpisode.get(shot.episodeNumber) ?? [];
+    list.push(shot);
+    byEpisode.set(shot.episodeNumber, list);
+  }
+
+  const segments: VideoSegment[] = [];
+  for (const [episodeNumber, episodeShots] of Array.from(byEpisode.entries()).sort(([a], [b]) => a - b)) {
+    const sorted = [...episodeShots].sort((a, b) => a.shotNumber - b.shotNumber);
+    let group: Shot[] = [];
+    let duration = 0;
+    let segmentNumber = 1;
+    const flush = () => {
+      if (!group.length) return;
+      segments.push({
+        id: `${episodeNumber}-${segmentNumber}`,
+        episodeNumber,
+        segmentNumber,
+        duration: Math.max(8, Math.min(15, duration || group.length * 5)),
+        shots: group,
+      });
+      group = [];
+      duration = 0;
+      segmentNumber++;
+    };
+    for (const shot of sorted) {
+      const shotDuration = shot.videoDuration ?? 5;
+      if (group.length >= 3 || (duration + shotDuration > 15 && group.length >= 2)) flush();
+      group.push(shot);
+      duration += shotDuration;
+    }
+    flush();
+  }
+  return segments;
 }
 
 export default function PremiumStudio() {
@@ -193,24 +304,23 @@ function InternalGate({ children }: { children: ReactNode }) {
     onError: (err) => toast.error(err.message),
   });
 
-  if (me.isLoading || status.isLoading) {
-    return <LoadingScreen />;
-  }
-
+  if (me.isLoading || status.isLoading) return <LoadingScreen />;
   if (me.data) return <>{children}</>;
 
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, display: "grid", placeItems: "center", padding: 20 }}>
-      <section style={panel({ width: "min(420px, 100%)", padding: 24 })}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 18 }}>
-          <KeyRound size={24} style={{ color: C.gold }} />
+    <div style={{ minHeight: "100vh", background: C.app, color: C.text, display: "grid", placeItems: "center", padding: 20 }}>
+      <section style={card({ width: "min(420px, 100%)", padding: 24 })}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
+          <div style={{ width: 42, height: 42, borderRadius: 12, background: C.purpleSoft, color: C.purple, display: "grid", placeItems: "center" }}>
+            <KeyRound size={22} />
+          </div>
           <div>
             <h1 style={{ margin: 0, fontSize: 20 }}>鎏光机内部访问</h1>
-            <div style={{ color: C.sub, fontSize: 12, marginTop: 4 }}>输入内部访问密码进入工作台</div>
+            <div style={{ ...tinyLabel(), marginTop: 4 }}>输入内部访问密码进入工作台</div>
           </div>
         </div>
         {!status.data?.configured ? (
-          <div style={{ color: C.rose, fontSize: 13, lineHeight: 1.7 }}>服务器还没有配置内部访问密码。</div>
+          <div style={{ ...tinyLabel(C.red), lineHeight: 1.7 }}>服务器还没有配置内部访问密码。</div>
         ) : (
           <form
             style={{ display: "grid", gap: 12 }}
@@ -219,14 +329,8 @@ function InternalGate({ children }: { children: ReactNode }) {
               login.mutate({ password });
             }}
           >
-            <Input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="访问密码"
-              style={field()}
-            />
-            <Button disabled={!password || login.isPending} style={{ background: C.gold, color: C.bg, fontWeight: 800 }}>
+            <Input type="password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="访问密码" style={field()} />
+            <Button disabled={!password || login.isPending} style={{ background: C.ink, color: "#fff", fontWeight: 800, borderRadius: 8 }}>
               {login.isPending ? <Loader2 className="animate-spin" size={15} /> : <Check size={15} />}
               进入
             </Button>
@@ -237,352 +341,363 @@ function InternalGate({ children }: { children: ReactNode }) {
   );
 }
 
-function StudioShell() {
-  const [activeProjectId, setActiveProjectId] = useState<number | null>(null);
-  if (!activeProjectId) return <ProjectBoard onOpen={setActiveProjectId} />;
-  return <Workspace projectId={activeProjectId} onBack={() => setActiveProjectId(null)} />;
-}
-
 function LoadingScreen() {
   return (
-    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, display: "grid", placeItems: "center" }}>
-      <Loader2 className="animate-spin" style={{ color: C.gold }} />
+    <div style={{ minHeight: "100vh", background: C.app, display: "grid", placeItems: "center" }}>
+      <Loader2 className="animate-spin" style={{ color: C.purple }} />
     </div>
   );
 }
 
-function ProjectBoard({ onOpen }: { onOpen: (id: number) => void }) {
+function StudioShell() {
+  const [activeProjectId, setActiveProjectId] = useState<number | null>(null);
+  const [module, setModule] = useState<ModuleKey>("definition");
+  const [scriptText, setScriptText] = useState("");
+  const [episodes, setEpisodes] = useState<SplitEpisode[]>([]);
+  const [activeEpisode, setActiveEpisode] = useState(1);
+  const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
+
+  const projectsQuery = trpc.overseas.listProjects.useQuery(undefined, { refetchOnWindowFocus: false });
+  const projectQuery = trpc.overseas.getProject.useQuery(
+    { id: activeProjectId! },
+    { enabled: activeProjectId !== null, refetchOnWindowFocus: false }
+  );
+  const projects = (projectsQuery.data ?? []) as Project[];
+  const project = projectQuery.data?.project as Project | undefined;
+  const shots = (projectQuery.data?.shots ?? []) as Shot[];
+
+  useEffect(() => {
+    if (!activeProjectId && projects.length > 0) setActiveProjectId(projects[0].id);
+  }, [activeProjectId, projects]);
+
+  const subtitle = project
+    ? `${project.aspectRatio === "portrait" ? "9:16 竖屏" : "16:9 横屏"} · ${getVisualStylePreset(project.visualStylePreset).name}`
+    : "固定资产参考驱动的 Seedance 2.0 精品剧工作台";
+
+  return (
+    <div style={{ minHeight: "100vh", background: C.app, color: C.text, display: "grid", gridTemplateColumns: "280px 1fr" }}>
+      <Sidebar
+        projects={projects}
+        activeProjectId={activeProjectId}
+        activeModule={module}
+        onProject={(id) => setActiveProjectId(id)}
+        onNew={() => {
+          setActiveProjectId(null);
+          setModule("definition");
+        }}
+        onModule={setModule}
+      />
+      <main style={{ minWidth: 0, display: "grid", gridTemplateRows: "64px 1fr" }}>
+        <header style={{ background: C.panel, borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px" }}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 900 }}>{project?.name ?? "新项目"}</div>
+            <div style={{ ...tinyLabel(), marginTop: 3 }}>{subtitle}</div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={pill(Boolean(project))}>{project ? "已连接项目" : "等待创建"}</span>
+            <span style={pill()}>{shots.length} 个分镜</span>
+            <span style={pill()}>{buildSegments(shots).length} 个视频段</span>
+          </div>
+        </header>
+        <section style={{ minHeight: 0, overflow: "hidden" }}>
+          {module === "definition" && (
+            <DefinitionView
+              project={project}
+              scriptText={scriptText}
+              onScriptText={setScriptText}
+              onCreated={(id) => {
+                setActiveProjectId(id);
+                setModule("script");
+              }}
+              onSaved={() => {
+                projectQuery.refetch();
+                projectsQuery.refetch();
+              }}
+            />
+          )}
+          {module === "script" && (
+            <ScriptSplitView
+              project={project}
+              scriptText={scriptText}
+              episodes={episodes}
+              activeEpisode={activeEpisode}
+              onScriptText={setScriptText}
+              onEpisodes={setEpisodes}
+              onActiveEpisode={setActiveEpisode}
+              onChanged={() => projectQuery.refetch()}
+            />
+          )}
+          {module === "rules" && <DirectorRulesView project={project} scriptText={scriptText} onSaved={() => projectQuery.refetch()} />}
+          {module === "assets" && <AssetsView project={project} />}
+          {module === "shots" && (
+            <ShotWorkbench
+              project={project}
+              shots={shots}
+              activeEpisode={activeEpisode}
+              activeSegmentId={activeSegmentId}
+              onActiveEpisode={setActiveEpisode}
+              onActiveSegment={setActiveSegmentId}
+              onChanged={() => projectQuery.refetch()}
+            />
+          )}
+          {module === "records" && <GenerationRecordsView project={project} shots={shots} />}
+        </section>
+      </main>
+    </div>
+  );
+}
+
+function Sidebar({
+  projects,
+  activeProjectId,
+  activeModule,
+  onProject,
+  onNew,
+  onModule,
+}: {
+  projects: Project[];
+  activeProjectId: number | null;
+  activeModule: ModuleKey;
+  onProject: (id: number) => void;
+  onNew: () => void;
+  onModule: (module: ModuleKey) => void;
+}) {
+  return (
+    <aside style={{ background: C.side, borderRight: `1px solid ${C.line}`, padding: 16, display: "grid", gridTemplateRows: "auto auto 1fr", gap: 18, minHeight: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9, fontWeight: 900 }}>
+          <Clapperboard size={22} style={{ color: C.ink }} />
+          鎏光机
+        </div>
+        <Button size="sm" variant="outline" onClick={onNew} style={{ borderColor: C.line, borderRadius: 8 }}>
+          <Plus size={14} />
+        </Button>
+      </div>
+      <nav style={{ display: "grid", gap: 6 }}>
+        {navItems.map((item) => (
+          <button
+            key={item.key}
+            onClick={() => onModule(item.key)}
+            style={{
+              height: 38,
+              border: `1px solid ${activeModule === item.key ? "#d8ccff" : "transparent"}`,
+              background: activeModule === item.key ? C.purpleSoft : "transparent",
+              color: activeModule === item.key ? C.purple : C.text,
+              borderRadius: 8,
+              padding: "0 10px",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              cursor: "pointer",
+              fontWeight: 800,
+              fontSize: 13,
+            }}
+          >
+            {item.icon}
+            {item.label}
+          </button>
+        ))}
+      </nav>
+      <section style={{ minHeight: 0, overflow: "auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+          <div style={{ ...tinyLabel(C.dim), fontWeight: 800 }}>项目列表</div>
+          <span style={tinyLabel(C.dim)}>{projects.length}</span>
+        </div>
+        <div style={{ display: "grid", gap: 8 }}>
+          {projects.map((project) => (
+            <button
+              key={project.id}
+              onClick={() => onProject(project.id)}
+              style={{
+                ...card({
+                  padding: 10,
+                  textAlign: "left",
+                  cursor: "pointer",
+                  background: activeProjectId === project.id ? "#fff" : "transparent",
+                  borderColor: activeProjectId === project.id ? C.lineStrong : "transparent",
+                  boxShadow: activeProjectId === project.id ? "0 4px 16px rgba(20,20,20,0.05)" : "none",
+                }),
+              }}
+            >
+              <div style={{ fontSize: 13, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{project.name}</div>
+              <div style={{ ...tinyLabel(C.dim), marginTop: 5 }}>{project.aspectRatio === "portrait" ? "9:16" : "16:9"} · {getVisualStylePreset(project.visualStylePreset).name}</div>
+            </button>
+          ))}
+          {projects.length === 0 && <div style={{ ...tinyLabel(C.dim), lineHeight: 1.7 }}>还没有项目。点击上方 + 创建第一个精品剧。</div>}
+        </div>
+      </section>
+    </aside>
+  );
+}
+
+function DefinitionView({
+  project,
+  scriptText,
+  onScriptText,
+  onCreated,
+  onSaved,
+}: {
+  project?: Project;
+  scriptText: string;
+  onScriptText: (text: string) => void;
+  onCreated: (id: number) => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState(project?.name ?? "");
+  const [definition, setDefinition] = useState(project?.definition ?? "");
+  const [aspectRatio, setAspectRatio] = useState<Project["aspectRatio"]>(project?.aspectRatio ?? "portrait");
+  const [presetId, setPresetId] = useState(project?.visualStylePreset ?? "natural_practical_light");
+  const [enhancerIds, setEnhancerIds] = useState<string[]>(parseStyleEnhancers(project?.styleEnhancers));
+
+  useEffect(() => {
+    setName(project?.name ?? "");
+    setDefinition(project?.definition ?? "");
+    setAspectRatio(project?.aspectRatio ?? "portrait");
+    setPresetId(project?.visualStylePreset ?? "natural_practical_light");
+    setEnhancerIds(parseStyleEnhancers(project?.styleEnhancers));
+  }, [project?.id]);
+
   const utils = trpc.useUtils();
-  const [name, setName] = useState("");
-  const [definition, setDefinition] = useState("");
-  const [aspectRatio, setAspectRatio] = useState<Project["aspectRatio"]>("portrait");
-  const [presetId, setPresetId] = useState("natural_practical_light");
-  const [enhancerIds, setEnhancerIds] = useState<string[]>([]);
   const preset = getVisualStylePreset(presetId);
   const enhancerState = validateStyleEnhancers(enhancerIds);
   const visualStylePrompt = buildVisualStylePrompt(preset, enhancerState.selectedIds);
-  const { data: projects = [], isLoading } = trpc.overseas.listProjects.useQuery();
   const createProject = trpc.overseas.createProject.useMutation({
-    onSuccess: async (project) => {
-      toast.success("新项目已创建");
+    onSuccess: async (created) => {
+      toast.success("项目已创建");
       await utils.overseas.listProjects.invalidate();
-      onOpen(project.id);
+      onCreated(created.id);
     },
     onError: (err) => toast.error(err.message),
   });
-
-  return (
-    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, display: "grid", gridTemplateRows: "64px 1fr" }}>
-      <header style={{ background: C.band, borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <Clapperboard size={22} style={{ color: C.gold }} />
-          <div>
-            <div style={{ fontSize: 18, fontWeight: 900 }}>鎏光机精品剧工作台</div>
-            <div style={{ fontSize: 12, color: C.sub }}>Seedance 2.0 · gpt-image-2 · 摄影风格预设</div>
-          </div>
-        </div>
-      </header>
-      <main style={{ padding: 22, display: "grid", gridTemplateColumns: "380px 1fr", gap: 18, minHeight: 0 }}>
-        <section style={panel({ padding: 18, alignSelf: "start" })}>
-          <h2 style={{ margin: "0 0 14px", fontSize: 16 }}>新建项目</h2>
-          <div style={{ display: "grid", gap: 11 }}>
-            <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="项目名称" style={field()} />
-            <Textarea value={definition} onChange={(event) => setDefinition(event.target.value)} placeholder="一句话故事、核心人物关系、必须保留或禁止的内容" rows={5} style={field()} />
-            <Select value={aspectRatio} onValueChange={(value) => setAspectRatio(value as Project["aspectRatio"])}>
-              <SelectTrigger style={field()}><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="portrait">9:16 竖屏</SelectItem>
-                <SelectItem value="landscape">16:9 横屏</SelectItem>
-              </SelectContent>
-            </Select>
-            <StylePresetSelect value={presetId} onValueChange={setPresetId} />
-            <StyleEnhancerPicker value={enhancerState.selectedIds} onChange={setEnhancerIds} />
-            <div style={{ color: C.dim, fontSize: 12, lineHeight: 1.6, whiteSpace: "pre-wrap", maxHeight: 120, overflow: "auto" }}>{visualStylePrompt}</div>
-            {enhancerState.warnings.length > 0 && <div style={{ color: C.gold, fontSize: 12, lineHeight: 1.6 }}>{enhancerState.warnings.join(" ")}</div>}
-            <Button
-              disabled={!name.trim() || createProject.isPending}
-              onClick={() => createProject.mutate({
-                name,
-                definition,
-                market: "cn",
-                aspectRatio,
-                style: "realistic",
-                genre: preset.id,
-                visualStylePreset: preset.id,
-                styleEnhancers: JSON.stringify(enhancerState.selectedIds),
-                visualStylePrompt,
-                projectType: "premium",
-              })}
-              style={{ background: C.gold, color: C.bg, fontWeight: 900 }}
-            >
-              {createProject.isPending ? <Loader2 className="animate-spin" size={15} /> : <Plus size={15} />}
-              创建精品剧
-            </Button>
-          </div>
-        </section>
-        <section style={{ minHeight: 0, overflow: "auto" }}>
-          {isLoading ? <LoadingScreen /> : (projects as Project[]).length === 0 ? (
-            <div style={panel({ height: "100%", minHeight: 360, display: "grid", placeItems: "center", color: C.dim })}>暂无项目</div>
-          ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 12 }}>
-              {(projects as Project[]).map((project) => {
-                const style = getVisualStylePreset(project.visualStylePreset);
-                return (
-                  <button key={project.id} onClick={() => onOpen(project.id)} style={{ ...panel({ padding: 16, textAlign: "left", cursor: "pointer" }) }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ fontSize: 15, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{project.name}</div>
-                        <div style={{ color: C.sub, fontSize: 12, marginTop: 5 }}>{project.aspectRatio === "portrait" ? "9:16" : "16:9"} · {style.name}</div>
-                      </div>
-                      <Sparkles size={16} style={{ color: C.gold, flexShrink: 0 }} />
-                    </div>
-                    <div style={{ color: C.dim, fontSize: 12, lineHeight: 1.6, marginTop: 14, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                      {project.definition || "未填写项目定义"}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </section>
-      </main>
-    </div>
-  );
-}
-
-function Workspace({ projectId, onBack }: { projectId: number; onBack: () => void }) {
-  const [tab, setTab] = useState<TabKey>("definition");
-  const [episode, setEpisode] = useState(1);
-  const { data, refetch } = trpc.overseas.getProject.useQuery({ id: projectId });
-  const project = data?.project as Project | undefined;
-  const shots = (data?.shots ?? []) as Shot[];
-  const maxEpisode = Math.max(1, ...shots.map((shot) => shot.episodeNumber));
-
-  useEffect(() => {
-    if (shots.length > 0 && !shots.some((shot) => shot.episodeNumber === episode)) {
-      setEpisode(shots[0].episodeNumber);
-    }
-  }, [episode, shots]);
-
-  if (!project) return <LoadingScreen />;
-
-  return (
-    <div style={{ minHeight: "100vh", background: C.bg, color: C.text, display: "grid", gridTemplateRows: "64px 1fr" }}>
-      <header style={{ background: C.band, borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 18px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button onClick={onBack} style={{ border: "none", background: "transparent", color: C.sub, display: "flex", alignItems: "center", gap: 5, cursor: "pointer" }}>
-            <ArrowLeft size={16} /> 项目
-          </button>
-          <div style={{ width: 1, height: 24, background: C.line }} />
-          <div>
-            <div style={{ fontSize: 15, fontWeight: 900 }}>{project.name}</div>
-            <div style={{ color: C.sub, fontSize: 12 }}>{project.aspectRatio === "portrait" ? "9:16" : "16:9"} · {getVisualStylePreset(project.visualStylePreset).name}</div>
-          </div>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 6, background: C.bg, border: `1px solid ${C.line}`, borderRadius: 8, padding: 4 }}>
-          {tabs.map((item) => (
-            <button key={item.key} onClick={() => setTab(item.key)} style={{
-              height: 34,
-              padding: "0 11px",
-              border: "none",
-              borderRadius: 6,
-              background: tab === item.key ? C.gold : "transparent",
-              color: tab === item.key ? C.bg : C.sub,
-              display: "flex",
-              alignItems: "center",
-              gap: 6,
-              cursor: "pointer",
-              fontWeight: 800,
-              fontSize: 12,
-            }}>
-              {item.icon}{item.label}
-            </button>
-          ))}
-        </div>
-      </header>
-      <main style={{ minHeight: 0 }}>
-        {tab === "definition" && <DefinitionPanel project={project} onSaved={refetch} />}
-        {tab === "script" && <ScriptPanel project={project} activeEpisode={episode} onEpisodeChange={setEpisode} onChanged={refetch} />}
-        {tab === "assets" && <AssetsPanel project={project} />}
-        {tab === "storyboard" && <StoryboardPanel project={project} activeEpisode={episode} maxEpisode={maxEpisode} onEpisodeChange={setEpisode} />}
-        {tab === "video" && <VideoPanel project={project} activeEpisode={episode} maxEpisode={maxEpisode} onEpisodeChange={setEpisode} />}
-      </main>
-    </div>
-  );
-}
-
-function StylePresetSelect({ value, onValueChange }: { value: string; onValueChange: (value: string) => void }) {
-  return (
-    <Select value={value} onValueChange={onValueChange}>
-      <SelectTrigger style={field()}><SelectValue /></SelectTrigger>
-      <SelectContent>
-        {VISUAL_STYLE_PRESETS.map((preset) => (
-          <SelectItem key={preset.id} value={preset.id}>{preset.name}</SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
-  );
-}
-
-function StyleEnhancerPicker({ value, onChange }: { value: string[]; onChange: (value: string[]) => void }) {
-  const toggle = (id: string) => {
-    if (value.includes(id)) {
-      onChange(value.filter((item) => item !== id));
-      return;
-    }
-    if (value.length >= 5) {
-      toast.warning("增强标签最多选择 5 个");
-      return;
-    }
-    onChange([...value, id]);
-  };
-
-  return (
-    <div style={{ display: "grid", gap: 8 }}>
-      <div style={{ color: C.sub, fontSize: 12 }}>摄影增强标签（最多 5 个）</div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-        {STYLE_ENHANCERS.map((item) => {
-          const selected = value.includes(item.id);
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => toggle(item.id)}
-              title={item.prompt}
-              style={{
-                minHeight: 28,
-                borderRadius: 6,
-                border: `1px solid ${selected ? C.gold : C.line}`,
-                background: selected ? "oklch(0.24 0.035 75)" : C.band,
-                color: selected ? C.gold : C.sub,
-                cursor: "pointer",
-                fontSize: 12,
-                padding: "4px 8px",
-                lineHeight: 1.2,
-              }}
-            >
-              {item.label}
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
-
-function DefinitionPanel({ project, onSaved }: { project: Project; onSaved: () => void }) {
-  const [form, setForm] = useState({
-    name: project.name,
-    definition: project.definition ?? "",
-    aspectRatio: project.aspectRatio,
-    visualStylePreset: project.visualStylePreset,
-    styleEnhancers: parseStyleEnhancers(project.styleEnhancers),
-    visualStylePrompt: project.visualStylePrompt || buildVisualStylePrompt(getVisualStylePreset(project.visualStylePreset), parseStyleEnhancers(project.styleEnhancers)),
-    projectBible: project.projectBible ?? "",
-  });
-  const selectedPreset = getVisualStylePreset(form.visualStylePreset);
-  const enhancerState = validateStyleEnhancers(form.styleEnhancers);
-  const update = trpc.overseas.updateProject.useMutation({
-    onSuccess: () => {
+  const updateProject = trpc.overseas.updateProject.useMutation({
+    onSuccess: async () => {
       toast.success("项目定义已保存");
+      await utils.overseas.listProjects.invalidate();
       onSaved();
     },
     onError: (err) => toast.error(err.message),
   });
 
-  const selectPreset = (presetId: string) => {
-    const nextPreset = getVisualStylePreset(presetId);
-    setForm((prev) => ({
-      ...prev,
-      visualStylePreset: presetId,
-      visualStylePrompt: buildVisualStylePrompt(nextPreset, prev.styleEnhancers),
-    }));
-  };
-
-  const selectEnhancers = (styleEnhancers: string[]) => {
-    const { selectedIds } = validateStyleEnhancers(styleEnhancers);
-    setForm((prev) => ({
-      ...prev,
-      styleEnhancers: selectedIds,
-      visualStylePrompt: buildVisualStylePrompt(getVisualStylePreset(prev.visualStylePreset), selectedIds),
-    }));
+  const save = () => {
+    if (!name.trim()) {
+      toast.error("请先填写项目名称");
+      return;
+    }
+    const payload = {
+      name: name.trim(),
+      definition,
+      market: "cn",
+      aspectRatio,
+      style: "realistic" as const,
+      genre: preset.id,
+      visualStylePreset: preset.id,
+      styleEnhancers: JSON.stringify(enhancerState.selectedIds),
+      visualStylePrompt,
+      projectType: "premium" as const,
+    };
+    if (project) updateProject.mutate({ id: project.id, ...payload });
+    else createProject.mutate(payload);
   };
 
   return (
-    <div style={{ padding: 18, height: "calc(100vh - 64px)", display: "grid", gridTemplateColumns: "minmax(420px, 620px) 1fr", gap: 16 }}>
-      <section style={panel({ padding: 16, overflow: "auto" })}>
-        <h2 style={{ margin: "0 0 14px", fontSize: 16 }}>项目定义</h2>
-        <div style={{ display: "grid", gap: 11 }}>
-          <Input value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} style={field()} />
-          <Textarea value={form.definition} onChange={(event) => setForm((prev) => ({ ...prev, definition: event.target.value }))} rows={6} style={field()} placeholder="一句话故事、核心人物关系、必须保留或禁止的内容" />
-          <Select value={form.aspectRatio} onValueChange={(value) => setForm((prev) => ({ ...prev, aspectRatio: value as Project["aspectRatio"] }))}>
+    <div style={{ height: "calc(100vh - 64px)", padding: 22, display: "grid", gridTemplateColumns: "minmax(520px, 1fr) 320px", gap: 18, overflow: "hidden" }}>
+      <section style={card({ padding: 18, display: "grid", gridTemplateRows: "auto auto 1fr auto", gap: 14, minHeight: 0 })}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 20 }}>项目定义</h1>
+          <div style={{ ...tinyLabel(), marginTop: 6 }}>只保留项目名、画幅、剧本和摄影风格，不再让用户填写集数和时长。</div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 170px 220px", gap: 10 }}>
+          <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="项目名称" style={field()} />
+          <Select value={aspectRatio} onValueChange={(value) => setAspectRatio(value as Project["aspectRatio"])}>
             <SelectTrigger style={field()}><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="portrait">9:16 竖屏</SelectItem>
               <SelectItem value="landscape">16:9 横屏</SelectItem>
             </SelectContent>
           </Select>
-          <StylePresetSelect value={form.visualStylePreset} onValueChange={selectPreset} />
-          <StyleEnhancerPicker value={enhancerState.selectedIds} onChange={selectEnhancers} />
-          {enhancerState.warnings.length > 0 && <div style={{ color: C.gold, fontSize: 12, lineHeight: 1.6 }}>{enhancerState.warnings.join(" ")}</div>}
-          <Textarea value={form.visualStylePrompt} onChange={(event) => setForm((prev) => ({ ...prev, visualStylePrompt: event.target.value }))} rows={10} style={{ ...field(), lineHeight: 1.6 }} />
-          <Button
-            disabled={update.isPending}
-            onClick={() => update.mutate({
-              id: project.id,
-              name: form.name,
-              definition: form.definition,
-              aspectRatio: form.aspectRatio,
-              market: "cn",
-              style: "realistic",
-              genre: selectedPreset.id,
-              visualStylePreset: selectedPreset.id,
-              styleEnhancers: JSON.stringify(enhancerState.selectedIds),
-              visualStylePrompt: form.visualStylePrompt,
-              projectBible: form.projectBible,
-              projectType: "premium",
-              videoEngine: "seedance_2_0",
+          <Select value={presetId} onValueChange={setPresetId}>
+            <SelectTrigger style={field()}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {VISUAL_STYLE_PRESETS.map((presetItem) => <SelectItem key={presetItem.id} value={presetItem.id}>{presetItem.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div style={{ display: "grid", gridTemplateRows: "120px 1fr", gap: 10, minHeight: 0 }}>
+          <Textarea value={definition} onChange={(event) => setDefinition(event.target.value)} placeholder="项目一句话设定、核心人物关系、必须保留或禁止的内容" style={{ ...field(), resize: "none", lineHeight: 1.7 }} />
+          <Textarea value={scriptText} onChange={(event) => onScriptText(event.target.value)} placeholder="粘贴完整剧本，或者先创建项目后到“剧本分集”页继续粘贴。" style={{ ...field(), resize: "none", minHeight: 0, lineHeight: 1.75 }} />
+        </div>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {STYLE_ENHANCERS.slice(0, 8).map((tag) => {
+              const selected = enhancerIds.includes(tag.id);
+              return (
+                <button key={tag.id} type="button" onClick={() => setEnhancerIds((prev) => selected ? prev.filter((id) => id !== tag.id) : [...prev, tag.id].slice(0, 5))} style={pill(selected)}>
+                  {tag.label}
+                </button>
+              );
             })}
-            style={{ background: C.gold, color: C.bg, fontWeight: 900, justifySelf: "start" }}
-          >
-            {update.isPending ? <Loader2 className="animate-spin" size={15} /> : <Save size={15} />}
-            保存
+          </div>
+          <Button onClick={save} disabled={createProject.isPending || updateProject.isPending} style={{ background: C.ink, color: "#fff", borderRadius: 8, minWidth: 140 }}>
+            {createProject.isPending || updateProject.isPending ? <Loader2 className="animate-spin" size={15} /> : <Save size={15} />}
+            {project ? "保存项目" : "创建并分集"}
           </Button>
         </div>
       </section>
-      <section style={panel({ padding: 16, overflow: "auto", display: "grid", gridTemplateRows: "auto 1fr", gap: 12 })}>
-        <div>
-          <h2 style={{ margin: 0, fontSize: 16 }}>项目圣经</h2>
-          <div style={{ color: C.sub, fontSize: 12, marginTop: 6 }}>剧本页生成后会写入这里，也可以人工修改。</div>
-        </div>
-        <Textarea value={form.projectBible} onChange={(event) => setForm((prev) => ({ ...prev, projectBible: event.target.value }))} style={{ ...field(), minHeight: 0, resize: "none", lineHeight: 1.7 }} />
-      </section>
+      <aside style={{ display: "grid", gridTemplateRows: "auto auto 1fr", gap: 12, minHeight: 0 }}>
+        <section style={card({ padding: 16 })}>
+          <div style={{ fontSize: 14, fontWeight: 900, marginBottom: 12 }}>项目准备状态</div>
+          {[
+            ["剧本", scriptText.trim() ? "已导入" : "未导入"],
+            ["导演规则", project?.projectBible ? "已生成" : "未生成"],
+            ["资产库", "待整理"],
+            ["视频段", "待拆解"],
+          ].map(([label, value]) => (
+            <div key={label} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderTop: `1px solid ${C.line}` }}>
+              <span style={tinyLabel()}>{label}</span>
+              <strong style={{ fontSize: 12 }}>{value}</strong>
+            </div>
+          ))}
+        </section>
+        <section style={card({ padding: 16 })}>
+          <div style={{ fontSize: 14, fontWeight: 900, marginBottom: 8 }}>视觉风格摘要</div>
+          <div style={{ ...tinyLabel(), whiteSpace: "pre-wrap", maxHeight: 210, overflow: "auto" }}>{visualStylePrompt}</div>
+        </section>
+        <section style={card({ padding: 16, minHeight: 0, overflow: "auto" })}>
+          <div style={{ fontSize: 14, fontWeight: 900, marginBottom: 8 }}>下一步</div>
+          <div style={{ ...tinyLabel(), lineHeight: 1.7 }}>创建项目后进入“剧本分集”，由 AI 自动识别集数，再拆成分镜镜头。后续多个分镜会合成 15 秒左右的视频段。</div>
+        </section>
+      </aside>
     </div>
   );
 }
 
-function ScriptPanel({ project, activeEpisode, onEpisodeChange, onChanged }: {
-  project: Project;
+function ScriptSplitView({
+  project,
+  scriptText,
+  episodes,
+  activeEpisode,
+  onScriptText,
+  onEpisodes,
+  onActiveEpisode,
+  onChanged,
+}: {
+  project?: Project;
+  scriptText: string;
+  episodes: SplitEpisode[];
   activeEpisode: number;
-  onEpisodeChange: (episode: number) => void;
+  onScriptText: (text: string) => void;
+  onEpisodes: (episodes: SplitEpisode[]) => void;
+  onActiveEpisode: (episode: number) => void;
   onChanged: () => void;
 }) {
   const utils = trpc.useUtils();
-  const [scriptText, setScriptText] = useState("");
-  const [episodes, setEpisodes] = useState<SplitEpisode[]>([]);
   const [jobId, setJobId] = useState<number | null>(null);
+  const selectedEpisode = episodes.find((episode) => episode.episodeNumber === activeEpisode) ?? episodes[0];
   const splitScript = trpc.overseas.splitScriptIntoEpisodes.useMutation({
     onSuccess: (data) => {
-      setEpisodes(data.episodes);
+      onEpisodes(data.episodes);
+      onActiveEpisode(data.episodes[0]?.episodeNumber ?? 1);
       toast.success(`已识别 ${data.episodes.length} 集`);
-    },
-    onError: (err) => toast.error(err.message),
-  });
-  const bible = trpc.overseas.generateProjectBible.useMutation({
-    onSuccess: async () => {
-      toast.success("项目圣经已生成");
-      await utils.overseas.getProject.invalidate({ id: project.id });
-      onChanged();
     },
     onError: (err) => toast.error(err.message),
   });
@@ -603,19 +718,22 @@ function ScriptPanel({ project, activeEpisode, onEpisodeChange, onChanged }: {
   );
 
   useEffect(() => {
-    if (!job || job.status !== "done") return;
+    if (!project || !job || job.status !== "done") return;
     toast.success(`分镜设计完成：${job.succeeded}/${job.total}`);
     setJobId(null);
     utils.overseas.getProject.invalidate({ id: project.id });
     utils.overseas.listShots.invalidate();
     onChanged();
-  }, [job, onChanged, project.id, utils]);
-
-  const sourceEpisodes = episodes.length > 0
-    ? episodes
-    : [{ episodeNumber: activeEpisode, title: `第 ${activeEpisode} 集`, scriptText }];
+  }, [job, onChanged, project, utils]);
 
   const startStoryboard = () => {
+    if (!project) {
+      toast.error("请先创建项目");
+      return;
+    }
+    const sourceEpisodes = episodes.length > 0
+      ? episodes
+      : [{ episodeNumber: activeEpisode, title: `第 ${activeEpisode} 集`, scriptText }];
     if (sourceEpisodes.some((episode) => episode.scriptText.trim().length < 10)) {
       toast.error("剧本文本不足");
       return;
@@ -632,73 +750,192 @@ function ScriptPanel({ project, activeEpisode, onEpisodeChange, onChanged }: {
   };
 
   return (
-    <div style={{ padding: 18, height: "calc(100vh - 64px)", display: "grid", gridTemplateColumns: "minmax(460px, 1fr) 420px", gap: 16 }}>
-      <section style={panel({ padding: 16, display: "grid", gridTemplateRows: "auto 1fr auto", gap: 12, minHeight: 0 })}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <h2 style={{ margin: 0, fontSize: 16 }}>剧本导入</h2>
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button variant="outline" disabled={bible.isPending || !scriptText.trim()} onClick={() => bible.mutate({ projectId: project.id, scriptText })} style={{ borderColor: C.line2, color: C.sub }}>
-              {bible.isPending ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />} 项目圣经
-            </Button>
-            <Button variant="outline" disabled={splitScript.isPending || !scriptText.trim()} onClick={() => splitScript.mutate({ projectId: project.id, scriptText })} style={{ borderColor: C.line2, color: C.sub }}>
-              {splitScript.isPending ? <Loader2 className="animate-spin" size={14} /> : <Layers size={14} />} 智能分集
-            </Button>
-            <Button disabled={batchParse.isPending || !!jobId} onClick={startStoryboard} style={{ background: C.gold, color: C.bg, fontWeight: 900 }}>
-              {batchParse.isPending || jobId ? <Loader2 className="animate-spin" size={14} /> : <Wand2 size={14} />} 分镜设计
-            </Button>
+    <div style={{ height: "calc(100vh - 64px)", padding: 22, display: "grid", gridTemplateColumns: "minmax(380px, 0.9fr) minmax(360px, 0.8fr) 360px", gap: 16, overflow: "hidden" }}>
+      <section style={card({ padding: 16, display: "grid", gridTemplateRows: "auto 1fr auto", gap: 12, minHeight: 0 })}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 17 }}>原始剧本</h2>
+            <div style={tinyLabel()}>AI 自动识别集数，不需要手填集数和时长。</div>
           </div>
+          <Button variant="outline" disabled={!project || splitScript.isPending || !scriptText.trim()} onClick={() => project && splitScript.mutate({ projectId: project.id, scriptText })} style={{ borderColor: C.line, borderRadius: 8 }}>
+            {splitScript.isPending ? <Loader2 className="animate-spin" size={14} /> : <Layers size={14} />}
+            智能分集
+          </Button>
         </div>
-        <Textarea value={scriptText} onChange={(event) => setScriptText(event.target.value)} placeholder="粘贴剧本。已有“第X集 / EP X”标记时会优先按原标记切分。" style={{ ...field(), minHeight: 0, resize: "none", lineHeight: 1.7 }} />
-        {jobId && job && <div style={{ color: C.sub, fontSize: 12 }}>{job.currentName} · {job.current}/{job.total}</div>}
+        <Textarea value={scriptText} onChange={(event) => onScriptText(event.target.value)} placeholder="粘贴剧本。已有“第X集 / EP X”标记时会优先按原标记切分。" style={{ ...field(), resize: "none", minHeight: 0, lineHeight: 1.75 }} />
+        {jobId && job && <div style={tinyLabel(C.purple)}>{job.currentName} · {job.current}/{job.total}</div>}
       </section>
-      <section style={panel({ padding: 16, overflow: "auto" })}>
-        <h2 style={{ margin: "0 0 12px", fontSize: 16 }}>分集结果</h2>
-        {episodes.length === 0 ? (
-          <div style={{ color: C.dim, fontSize: 13, lineHeight: 1.7 }}>智能分集后会显示在这里。分镜设计会自动读取这些分集。</div>
-        ) : (
-          <div style={{ display: "grid", gap: 10 }}>
-            {episodes.map((episode) => (
-              <button key={episode.episodeNumber} onClick={() => onEpisodeChange(episode.episodeNumber)} style={{
-                ...panel({ padding: 12, background: activeEpisode === episode.episodeNumber ? "oklch(0.24 0.035 75)" : C.panel2, textAlign: "left", cursor: "pointer" }),
-              }}>
-                <div style={{ fontSize: 13, fontWeight: 900 }}>第 {episode.episodeNumber} 集 · {episode.title}</div>
-                <div style={{ color: C.dim, fontSize: 12, lineHeight: 1.55, marginTop: 6, display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{episode.scriptText}</div>
-              </button>
-            ))}
-          </div>
-        )}
+      <section style={card({ padding: 16, minHeight: 0, overflow: "auto" })}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+          <h2 style={{ margin: 0, fontSize: 17 }}>AI 分集结果</h2>
+          <Button disabled={!project || batchParse.isPending || !!jobId} onClick={startStoryboard} style={{ background: C.ink, color: "#fff", borderRadius: 8 }}>
+            {batchParse.isPending || jobId ? <Loader2 className="animate-spin" size={14} /> : <Wand2 size={14} />}
+            生成分镜
+          </Button>
+        </div>
+        <div style={{ display: "grid", gap: 10 }}>
+          {episodes.map((episode) => (
+            <button
+              key={episode.episodeNumber}
+              onClick={() => onActiveEpisode(episode.episodeNumber)}
+              style={{
+                ...card({
+                  padding: 12,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  borderColor: activeEpisode === episode.episodeNumber ? "#d8ccff" : C.line,
+                  background: activeEpisode === episode.episodeNumber ? C.purpleSoft : C.panel,
+                }),
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                <strong style={{ fontSize: 13 }}>第 {episode.episodeNumber} 集 · {episode.title}</strong>
+                <span style={tinyLabel(activeEpisode === episode.episodeNumber ? C.purple : C.dim)}>待审核</span>
+              </div>
+              <div style={{ ...tinyLabel(), marginTop: 8, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{episode.scriptText}</div>
+            </button>
+          ))}
+          {episodes.length === 0 && <Empty title="智能分集后，结果会显示在这里。" icon={<FileText size={36} />} />}
+        </div>
+      </section>
+      <section style={card({ padding: 16, minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr auto", gap: 10 })}>
+        <h2 style={{ margin: 0, fontSize: 17 }}>当前集详情</h2>
+        <Input value={selectedEpisode?.title ?? ""} readOnly placeholder="集标题" style={field()} />
+        <Textarea value={selectedEpisode?.scriptText ?? ""} readOnly placeholder="当前集完整文本" style={{ ...field(), resize: "none", lineHeight: 1.65, minHeight: 0 }} />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <Button variant="outline" style={{ borderColor: C.line, borderRadius: 8 }} disabled>合并</Button>
+          <Button variant="outline" style={{ borderColor: C.line, borderRadius: 8 }} disabled>拆分</Button>
+          <Button variant="outline" style={{ borderColor: C.line, borderRadius: 8 }} disabled>锁定</Button>
+          <Button variant="outline" style={{ borderColor: C.line, borderRadius: 8 }} disabled>改标题</Button>
+        </div>
       </section>
     </div>
   );
 }
 
-function AssetsPanel({ project }: { project: Project }) {
+function DirectorRulesView({ project, scriptText, onSaved }: { project?: Project; scriptText: string; onSaved: () => void }) {
   const utils = trpc.useUtils();
+  const [rules, setRules] = useState(project?.projectBible ?? "");
+  useEffect(() => setRules(project?.projectBible ?? ""), [project?.id, project?.projectBible]);
+
+  const bible = trpc.overseas.generateProjectBible.useMutation({
+    onSuccess: async (data) => {
+      setRules(data.projectBible);
+      toast.success("导演规则已生成");
+      if (project) await utils.overseas.getProject.invalidate({ id: project.id });
+      onSaved();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+  const updateProject = trpc.overseas.updateProject.useMutation({
+    onSuccess: () => {
+      toast.success("导演规则已保存");
+      onSaved();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+
+  const generate = () => {
+    if (!project) return toast.error("请先创建项目");
+    const source = scriptText.trim() || project.definition || "";
+    if (source.trim().length < 10) return toast.error("请先在项目定义或剧本分集里提供足够文本");
+    bible.mutate({ projectId: project.id, scriptText: source });
+  };
+
+  const sections = [
+    ["故事核心", "主线冲突、人物目标、每集钩子原则"],
+    ["人物关系", "人物之间的权力、情感、隐瞒与冲突"],
+    ["表演规则", "语气、潜台词、沉默、呼吸和微表情"],
+    ["镜头节奏", "分镜密度、视频段合并、时长判断"],
+    ["禁止跑偏项", "不要新增剧情、不要脱离固定资产参考"],
+  ];
+
+  return (
+    <div style={{ height: "calc(100vh - 64px)", padding: 22, display: "grid", gridTemplateColumns: "1fr 340px", gap: 16, overflow: "hidden" }}>
+      <section style={card({ padding: 18, minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr auto", gap: 14 })}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 20 }}>导演规则</h1>
+          <div style={{ ...tinyLabel(), marginTop: 6 }}>服务于拆镜头、表演留白、节奏判断和 Seedance 提示词，不负责人物/场景外观一致性。</div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+          {sections.map(([title, desc]) => (
+            <div key={title} style={card({ padding: 12, background: C.panelSoft })}>
+              <div style={{ fontSize: 13, fontWeight: 900 }}>{title}</div>
+              <div style={{ ...tinyLabel(), marginTop: 6 }}>{desc}</div>
+            </div>
+          ))}
+        </div>
+        <Textarea value={rules} onChange={(event) => setRules(event.target.value)} placeholder="AI 生成后可编辑。它只影响表演、节奏、分镜和提示词，不锁定人物长相和场景外观。" style={{ ...field(), resize: "none", minHeight: 0, lineHeight: 1.75 }} />
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+          <Button variant="outline" disabled={bible.isPending || !project} onClick={generate} style={{ borderColor: C.line, borderRadius: 8 }}>
+            {bible.isPending ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />}
+            AI 生成导演规则
+          </Button>
+          <Button disabled={!project || updateProject.isPending} onClick={() => project && updateProject.mutate({ id: project.id, projectBible: rules })} style={{ background: C.ink, color: "#fff", borderRadius: 8 }}>
+            {updateProject.isPending ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
+            保存规则
+          </Button>
+        </div>
+      </section>
+      <aside style={card({ padding: 16, alignSelf: "start" })}>
+        <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 12 }}>规则使用范围</div>
+        {["智能分镜", "视频段合并", "15秒提示词", "表演潜台词", "镜头节奏"].map((item) => (
+          <div key={item} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderTop: `1px solid ${C.line}` }}>
+            <Check size={14} style={{ color: C.green }} />
+            <span style={tinyLabel(C.text)}>{item}</span>
+          </div>
+        ))}
+      </aside>
+    </div>
+  );
+}
+
+function AssetsView({ project }: { project?: Project }) {
+  const utils = trpc.useUtils();
+  const [category, setCategory] = useState<AssetType | "all">("all");
+  const [query, setQuery] = useState("");
+  const [selectedId, setSelectedId] = useState<number | null>(null);
   const [form, setForm] = useState<{ type: AssetType; name: string; description: string; file: File | null }>({
     type: "custom",
     name: "",
     description: "",
     file: null,
   });
-  const { data = [] } = trpc.overseas.listAssets.useQuery({ projectId: project.id });
-  const create = trpc.overseas.createAsset.useMutation();
-  const upload = trpc.overseas.uploadAssetToS3.useMutation();
-  const remove = trpc.overseas.deleteAsset.useMutation({
-    onSuccess: () => utils.overseas.listAssets.invalidate({ projectId: project.id }),
+  const { data = [] } = trpc.overseas.listAssets.useQuery(
+    { projectId: project?.id ?? 0 },
+    { enabled: Boolean(project?.id) }
+  );
+  const assets = (data as Asset[]).filter((asset) => {
+    if (category !== "all" && asset.type !== category) return false;
+    const keyword = query.trim().toLowerCase();
+    if (!keyword) return true;
+    return `${asset.name} ${asset.description ?? ""} ${asset.tags ?? ""}`.toLowerCase().includes(keyword);
+  });
+  const selected = assets.find((asset) => asset.id === selectedId) ?? assets[0];
+  const createAsset = trpc.overseas.createAsset.useMutation();
+  const uploadAsset = trpc.overseas.uploadAssetToS3.useMutation();
+  const deleteAsset = trpc.overseas.deleteAsset.useMutation({
+    onSuccess: () => {
+      toast.success("资产已删除");
+      if (project) utils.overseas.listAssets.invalidate({ projectId: project.id });
+    },
+    onError: (err) => toast.error(err.message),
   });
 
   const submit = async () => {
-    if (!form.name.trim()) return;
+    if (!project) return toast.error("请先创建项目");
+    if (!form.name.trim()) return toast.error("请填写资产名称");
     try {
-      const asset = await create.mutateAsync({
+      const asset = await createAsset.mutateAsync({
         projectId: project.id,
         type: form.type,
-        name: form.name,
+        name: form.name.trim(),
         description: form.description,
+        tags: assetTag({ ...form, id: 0, projectId: project.id } as unknown as Asset),
       });
       if (form.file) {
         const fileBase64 = await fileToBase64(form.file);
-        await upload.mutateAsync({
+        await uploadAsset.mutateAsync({
           assetId: asset.id,
           field: "referenceImageUrl",
           fileBase64,
@@ -708,6 +945,7 @@ function AssetsPanel({ project }: { project: Project }) {
       }
       toast.success("资产已添加");
       setForm({ type: "custom", name: "", description: "", file: null });
+      setSelectedId(asset.id);
       await utils.overseas.listAssets.invalidate({ projectId: project.id });
     } catch (err: any) {
       toast.error(err.message || "添加失败");
@@ -715,277 +953,504 @@ function AssetsPanel({ project }: { project: Project }) {
   };
 
   return (
-    <div style={{ padding: 18, height: "calc(100vh - 64px)", display: "grid", gridTemplateColumns: "340px 1fr", gap: 16 }}>
-      <section style={panel({ padding: 16, alignSelf: "start" })}>
-        <h2 style={{ margin: "0 0 12px", fontSize: 16 }}>添加资产</h2>
-        <div style={{ display: "grid", gap: 10 }}>
-          <Select value={form.type} onValueChange={(type) => setForm((prev) => ({ ...prev, type: type as AssetType }))}>
-            <SelectTrigger style={field()}><SelectValue /></SelectTrigger>
-            <SelectContent>{Object.entries(assetLabel).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent>
-          </Select>
-          <Input value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="资产名称" style={field()} />
-          <Textarea value={form.description} onChange={(event) => setForm((prev) => ({ ...prev, description: event.target.value }))} placeholder="外观、用途、连续性要求" rows={4} style={field()} />
-          <label style={{ ...panel({ padding: 12, display: "flex", gap: 8, alignItems: "center", cursor: "pointer", color: C.sub }) }}>
-            <Upload size={15} style={{ color: C.gold }} />
-            <span style={{ fontSize: 12 }}>{form.file ? form.file.name : "上传参考图"}</span>
-            <input hidden type="file" accept="image/*" onChange={(event) => setForm((prev) => ({ ...prev, file: event.target.files?.[0] ?? null }))} />
-          </label>
-          <Button disabled={!form.name.trim() || create.isPending || upload.isPending} onClick={submit} style={{ background: C.gold, color: C.bg, fontWeight: 900 }}>
-            {create.isPending || upload.isPending ? <Loader2 className="animate-spin" size={15} /> : <Plus size={15} />} 添加
-          </Button>
+    <div style={{ height: "calc(100vh - 64px)", padding: 22, display: "grid", gridTemplateColumns: "190px 1fr 360px", gap: 16, overflow: "hidden" }}>
+      <aside style={card({ padding: 12, display: "grid", gridTemplateRows: "auto 1fr auto", gap: 12, minHeight: 0 })}>
+        <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索资产" style={field()} />
+        <div style={{ display: "grid", gap: 6, alignContent: "start" }}>
+          {(["all", "character", "scene", "costume", "prop", "storyboard", "camera_diagram", "custom"] as Array<AssetType | "all">).map((type) => (
+            <button key={type} onClick={() => setCategory(type)} style={{
+              height: 34,
+              border: "none",
+              borderRadius: 8,
+              background: category === type ? C.purpleSoft : "transparent",
+              color: category === type ? C.purple : C.text,
+              textAlign: "left",
+              padding: "0 10px",
+              cursor: "pointer",
+              fontSize: 13,
+              fontWeight: 800,
+            }}>
+              {assetLabel[type]}
+            </button>
+          ))}
         </div>
-      </section>
-      <section style={{ minHeight: 0, overflow: "auto" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 12 }}>
-          {(data as Asset[]).map((asset) => {
-            const image = assetImage(asset);
-            return (
-              <article key={asset.id} style={panel({ overflow: "hidden" })}>
-                <div style={{ height: 140, background: C.band, display: "grid", placeItems: "center", borderBottom: `1px solid ${C.line}` }}>
-                  {image ? <img src={image} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <ImageIcon size={28} style={{ color: C.dim }} />}
-                </div>
-                <div style={{ padding: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 900 }}>{asset.name}</div>
-                      <div style={{ color: C.dim, fontSize: 11, marginTop: 4 }}>{assetLabel[asset.type]}</div>
-                    </div>
-                    <button onClick={() => remove.mutate({ id: asset.id })} style={{ border: "none", background: "transparent", color: C.dim, cursor: "pointer" }}><Trash2 size={14} /></button>
-                  </div>
-                  <div style={{ color: C.sub, fontSize: 12, lineHeight: 1.55, marginTop: 10, minHeight: 38 }}>{asset.description || "暂无描述"}</div>
-                  {(asset.mjPrompt || asset.stylePrompt) && (
-                    <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-                      <div style={{ color: C.dim, fontSize: 11 }}>资产提示词</div>
-                      <div style={{ color: C.sub, fontSize: 11, lineHeight: 1.5, maxHeight: 74, overflow: "auto", whiteSpace: "pre-wrap", background: C.band, border: `1px solid ${C.line}`, borderRadius: 6, padding: 8 }}>
-                        {asset.mjPrompt || asset.stylePrompt}
-                      </div>
-                      <Button variant="outline" size="sm" onClick={() => navigator.clipboard.writeText(asset.mjPrompt || asset.stylePrompt || "")} style={{ borderColor: C.line2, color: C.sub, justifySelf: "start" }}>
-                        <Copy size={13} /> 复制
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function EpisodeStepper({ activeEpisode, maxEpisode, onChange }: { activeEpisode: number; maxEpisode: number; onChange: (episode: number) => void }) {
-  return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-      {Array.from({ length: maxEpisode }, (_, index) => index + 1).map((episode) => (
-        <button key={episode} onClick={() => onChange(episode)} style={{
-          height: 28,
-          minWidth: 34,
-          borderRadius: 6,
-          border: `1px solid ${activeEpisode === episode ? C.gold : C.line}`,
-          background: activeEpisode === episode ? "oklch(0.24 0.035 75)" : C.band,
-          color: activeEpisode === episode ? C.gold : C.sub,
-          cursor: "pointer",
-          fontSize: 12,
-          fontWeight: 800,
-        }}>{episode}</button>
-      ))}
-    </div>
-  );
-}
-
-function ShotList({ shots, activeId, onSelect }: { shots: Shot[]; activeId: number | null; onSelect: (id: number) => void }) {
-  return (
-    <div style={{ display: "grid", gap: 8 }}>
-      {shots.map((shot) => (
-        <button key={shot.id} onClick={() => onSelect(shot.id)} style={{
-          ...panel({ padding: 10, textAlign: "left", cursor: "pointer", background: activeId === shot.id ? "oklch(0.24 0.035 75)" : C.panel2 }),
-        }}>
-          <div style={{ fontSize: 12, fontWeight: 900 }}>镜头 {shot.episodeNumber}.{shot.shotNumber} · {shot.videoDuration ?? 12}s</div>
-          <div style={{ color: C.dim, fontSize: 11, lineHeight: 1.45, marginTop: 5, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{shot.visualDescription}</div>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function StoryboardPanel({ project, activeEpisode, maxEpisode, onEpisodeChange }: {
-  project: Project;
-  activeEpisode: number;
-  maxEpisode: number;
-  onEpisodeChange: (episode: number) => void;
-}) {
-  const utils = trpc.useUtils();
-  const [activeShotId, setActiveShotId] = useState<number | null>(null);
-  const { data = [], refetch } = trpc.overseas.listShots.useQuery({ projectId: project.id, episodeNumber: activeEpisode });
-  const shots = data as Shot[];
-  const activeShot = shots.find((shot) => shot.id === activeShotId) ?? shots[0];
-  const generate = trpc.overseas.generateStoryboardSketch.useMutation({
-    onSuccess: () => {
-      toast.success("分镜草图已生成");
-      refetch();
-      utils.overseas.getProject.invalidate({ id: project.id });
-    },
-    onError: (err) => toast.error(err.message),
-  });
-  const addVisual = trpc.overseas.addShotVisualToAssetLibrary.useMutation({
-    onSuccess: () => toast.success("已加入资产库"),
-    onError: (err) => toast.error(err.message),
-  });
-
-  useEffect(() => setActiveShotId(null), [activeEpisode]);
-
-  return (
-    <div style={{ padding: 18, height: "calc(100vh - 64px)", display: "grid", gridTemplateColumns: "260px minmax(420px, 1fr) 380px", gap: 16 }}>
-      <aside style={panel({ padding: 12, overflow: "auto" })}>
-        <EpisodeStepper activeEpisode={activeEpisode} maxEpisode={maxEpisode} onChange={onEpisodeChange} />
-        <div style={{ height: 12 }} />
-        <ShotList shots={shots} activeId={activeShot?.id ?? null} onSelect={setActiveShotId} />
+        <div style={{ ...tinyLabel(), lineHeight: 1.6 }}>资产库是一级模块，镜头工作台只引用这里的固定资产。</div>
       </aside>
-      <section style={panel({ overflow: "hidden", display: "grid", placeItems: "center", background: C.band })}>
-        {activeShot?.storyboardSketchUrl ? <img src={activeShot.storyboardSketchUrl} alt="分镜草图" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <ImageIcon size={42} style={{ color: C.dim }} />}
-      </section>
-      <aside style={panel({ padding: 14, overflow: "auto" })}>
-        <h2 style={{ margin: "0 0 12px", fontSize: 16 }}>分镜设计</h2>
-        {activeShot ? (
-          <div style={{ display: "grid", gap: 11 }}>
-            <div style={{ color: C.sub, fontSize: 12, lineHeight: 1.65 }}>{activeShot.visualDescription}</div>
-            <Textarea value={activeShot.storyboardPrompt || ""} readOnly rows={8} style={{ ...field(), lineHeight: 1.55 }} />
-            <Button disabled={generate.isPending} onClick={() => generate.mutate({ shotId: activeShot.id, imageEngine: "image2", addToAssetLibrary: false })} style={{ background: C.gold, color: C.bg, fontWeight: 900 }}>
-              {generate.isPending ? <Loader2 className="animate-spin" size={15} /> : <Wand2 size={15} />} 生成草图
-            </Button>
-            <Button variant="outline" disabled={!activeShot.storyboardSketchUrl || addVisual.isPending} onClick={() => addVisual.mutate({ shotId: activeShot.id, kind: "storyboard" })} style={{ borderColor: C.line2, color: C.sub }}>
-              <Plus size={15} /> 加入资产库
+      <section style={card({ padding: 16, display: "grid", gridTemplateRows: "auto 1fr", gap: 14, minHeight: 0 })}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 20 }}>资产库</h1>
+            <div style={tinyLabel()}>人物、场景、服装、道具、分镜草图和机位图都在这里统一管理。</div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button variant="outline" style={{ borderColor: C.line, borderRadius: 8 }}><Search size={14} /> 批量管理</Button>
+            <Button disabled={!project || createAsset.isPending || uploadAsset.isPending} onClick={submit} style={{ background: C.ink, color: "#fff", borderRadius: 8 }}>
+              {createAsset.isPending || uploadAsset.isPending ? <Loader2 className="animate-spin" size={14} /> : <Plus size={14} />}
+              添加资产
             </Button>
           </div>
-        ) : <div style={{ color: C.dim, fontSize: 13 }}>暂无分镜</div>}
+        </div>
+        <div style={{ minHeight: 0, overflow: "auto" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: 12 }}>
+            {assets.map((asset) => {
+              const img = assetImage(asset);
+              return (
+                <button key={asset.id} onClick={() => setSelectedId(asset.id)} style={{
+                  ...card({ padding: 0, overflow: "hidden", cursor: "pointer", textAlign: "left", borderColor: selected?.id === asset.id ? "#d8ccff" : C.line }),
+                }}>
+                  <div style={{ height: 118, background: C.panelSoft, display: "grid", placeItems: "center", overflow: "hidden" }}>
+                    {img ? <img src={img} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <ImageIcon size={28} style={{ color: C.dim }} />}
+                  </div>
+                  <div style={{ padding: 10 }}>
+                    <div style={{ fontSize: 13, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.name}</div>
+                    <div style={{ ...tinyLabel(C.purple), marginTop: 5 }}>{assetTag(asset)}</div>
+                    <div style={{ ...tinyLabel(C.dim), marginTop: 4 }}>{assetLabel[asset.type]} {asset.isGlobalRef ? "· 固定参考" : ""}</div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          {assets.length === 0 && <Empty title="还没有资产。添加人物、场景或上传参考图。" icon={<Boxes size={36} />} />}
+        </div>
+      </section>
+      <aside style={card({ padding: 16, minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr auto", gap: 12 })}>
+        <div style={{ fontSize: 16, fontWeight: 900 }}>资产详情</div>
+        <div style={{ display: "grid", gap: 9 }}>
+          <Select value={form.type} onValueChange={(value) => setForm((prev) => ({ ...prev, type: value as AssetType }))}>
+            <SelectTrigger style={field()}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {(["character", "scene", "costume", "prop", "storyboard", "camera_diagram", "custom"] as AssetType[]).map((type) => <SelectItem key={type} value={type}>{assetLabel[type]}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <Input value={form.name} onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="新资产名称" style={field()} />
+          <Textarea value={form.description} onChange={(event) => setForm((prev) => ({ ...prev, description: event.target.value }))} placeholder="说明、连续性要求、可见细节" rows={3} style={{ ...field(), resize: "none" }} />
+          <label style={{ ...card({ padding: 10, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: C.sub }) }}>
+            <Upload size={15} />
+            <span style={tinyLabel()}>{form.file ? form.file.name : "上传参考图"}</span>
+            <input hidden type="file" accept="image/*" onChange={(event) => setForm((prev) => ({ ...prev, file: event.target.files?.[0] ?? null }))} />
+          </label>
+        </div>
+        <div style={{ minHeight: 0, overflow: "auto", borderTop: `1px solid ${C.line}`, paddingTop: 12 }}>
+          {selected ? (
+            <div style={{ display: "grid", gap: 10 }}>
+              <div style={{ height: 170, background: C.panelSoft, borderRadius: 8, overflow: "hidden", display: "grid", placeItems: "center" }}>
+                {assetImage(selected) ? <img src={assetImage(selected)!} alt={selected.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <ImageIcon size={30} style={{ color: C.dim }} />}
+              </div>
+              <div style={{ fontWeight: 900 }}>{selected.name}</div>
+              <div style={pill(true)}><AtSign size={13} /> {assetTag(selected)}</div>
+              <div style={{ ...tinyLabel(), lineHeight: 1.65 }}>{selected.description || "暂无说明"}</div>
+              {(selected.mjPrompt || selected.stylePrompt) && <div style={{ ...tinyLabel(), whiteSpace: "pre-wrap", background: C.panelSoft, borderRadius: 8, padding: 10 }}>{selected.mjPrompt || selected.stylePrompt}</div>}
+            </div>
+          ) : <Empty title="选择一个资产查看详情。" icon={<Database size={34} />} />}
+        </div>
+        <Button variant="outline" disabled={!selected || deleteAsset.isPending} onClick={() => selected && deleteAsset.mutate({ id: selected.id })} style={{ borderColor: C.line, borderRadius: 8, color: C.red }}>
+          <Trash2 size={14} /> 删除资产
+        </Button>
       </aside>
     </div>
   );
 }
 
-function VideoPanel({ project, activeEpisode, maxEpisode, onEpisodeChange }: {
-  project: Project;
+function ShotWorkbench({
+  project,
+  shots,
+  activeEpisode,
+  activeSegmentId,
+  onActiveEpisode,
+  onActiveSegment,
+  onChanged,
+}: {
+  project?: Project;
+  shots: Shot[];
   activeEpisode: number;
-  maxEpisode: number;
-  onEpisodeChange: (episode: number) => void;
+  activeSegmentId: string | null;
+  onActiveEpisode: (episode: number) => void;
+  onActiveSegment: (id: string) => void;
+  onChanged: () => void;
 }) {
   const utils = trpc.useUtils();
-  const promptRef = useRef<HTMLTextAreaElement>(null);
+  const segments = useMemo(() => buildSegments(shots), [shots]);
+  const episodeNumbers = Array.from(new Set(shots.map((shot) => shot.episodeNumber))).sort((a, b) => a - b);
+  const currentSegment = segments.find((segment) => segment.id === activeSegmentId) ?? segments.find((segment) => segment.episodeNumber === activeEpisode) ?? segments[0];
   const [activeShotId, setActiveShotId] = useState<number | null>(null);
+  const activeShot = currentSegment?.shots.find((shot) => shot.id === activeShotId) ?? currentSegment?.shots[0];
+  const segmentLead = currentSegment?.shots[0];
   const [selectedAssetIds, setSelectedAssetIds] = useState<number[]>([]);
+  const [segmentPrompt, setSegmentPrompt] = useState("");
   const [duration, setDuration] = useState(15);
-  const { data = [], refetch } = trpc.overseas.listShots.useQuery({ projectId: project.id, episodeNumber: activeEpisode });
-  const { data: assetData = [] } = trpc.overseas.listAssets.useQuery({ projectId: project.id });
-  const shots = data as Shot[];
+
+  const { data: assetData = [] } = trpc.overseas.listAssets.useQuery(
+    { projectId: project?.id ?? 0 },
+    { enabled: Boolean(project?.id) }
+  );
   const assets = assetData as Asset[];
-  const activeShot = shots.find((shot) => shot.id === activeShotId) ?? shots[0];
   const imageAssets = assets.filter((asset) => !!assetImage(asset));
-  const generatePrompt = trpc.overseas.generatePremiumVideoPrompt.useMutation({
-    onSuccess: () => {
-      toast.success("Seedance 2.0 提示词已生成");
-      refetch();
+  const selectedAssets = imageAssets.filter((asset) => selectedAssetIds.includes(asset.id));
+  const referenceUrls = selectedAssets.map((asset) => assetImage(asset)!).slice(0, 9);
+
+  useEffect(() => {
+    if (currentSegment) {
+      onActiveEpisode(currentSegment.episodeNumber);
+      setActiveShotId(currentSegment.shots[0]?.id ?? null);
+      setDuration(currentSegment.duration);
+      setSegmentPrompt(currentSegment.shots[0]?.videoPrompt ?? "");
+    }
+  }, [currentSegment?.id]);
+
+  const generateStoryboard = trpc.overseas.generateStoryboardSketch.useMutation({
+    onSuccess: async () => {
+      toast.success("分镜草图已生成");
+      if (project) await utils.overseas.getProject.invalidate({ id: project.id });
+      onChanged();
     },
     onError: (err) => toast.error(err.message),
   });
   const generateDiagram = trpc.overseas.generateCameraDiagram.useMutation({
-    onSuccess: () => {
-      toast.success("机位示意图已生成");
-      refetch();
+    onSuccess: async () => {
+      toast.success("机位图已生成");
+      if (project) await utils.overseas.getProject.invalidate({ id: project.id });
+      onChanged();
     },
     onError: (err) => toast.error(err.message),
   });
   const addVisual = trpc.overseas.addShotVisualToAssetLibrary.useMutation({
-    onSuccess: () => toast.success("已加入资产库"),
+    onSuccess: async () => {
+      toast.success("已加入资产库");
+      if (project) await utils.overseas.listAssets.invalidate({ projectId: project.id });
+    },
+    onError: (err) => toast.error(err.message),
+  });
+  const generateSegmentPrompt = trpc.overseas.generateVideoSegmentPrompt.useMutation({
+    onSuccess: async (data) => {
+      setSegmentPrompt(data.prompt);
+      toast.success("15 秒视频段提示词已生成");
+      if (project) await utils.overseas.getProject.invalidate({ id: project.id });
+      onChanged();
+    },
     onError: (err) => toast.error(err.message),
   });
   const generateVideo = trpc.overseas.generatePremiumVideo.useMutation({
-    onSuccess: () => {
-      toast.success("视频已生成");
-      refetch();
-      utils.overseas.getProject.invalidate({ id: project.id });
+    onSuccess: async () => {
+      toast.success("Seedance 2.0 视频已生成");
+      if (project) await utils.overseas.getProject.invalidate({ id: project.id });
+      onChanged();
     },
     onError: (err) => toast.error(err.message),
   });
 
-  useEffect(() => setActiveShotId(null), [activeEpisode]);
-  useEffect(() => setDuration(activeShot?.videoDuration ?? 15), [activeShot?.id, activeShot?.videoDuration]);
-
-  const refUrls = imageAssets.filter((asset) => selectedAssetIds.includes(asset.id)).map((asset) => assetImage(asset)!).slice(0, 9);
+  const previewImage = activeShot?.cameraDiagramUrl || activeShot?.storyboardSketchUrl;
+  const referenceTags = selectedAssets.map(assetTag);
+  if (activeShot?.storyboardSketchUrl) referenceTags.push(`@分镜EP${activeShot.episodeNumber}-${activeShot.shotNumber}`);
+  if (activeShot?.cameraDiagramUrl) referenceTags.push(`@机位EP${activeShot.episodeNumber}-${activeShot.shotNumber}`);
 
   return (
-    <div style={{ padding: 18, height: "calc(100vh - 64px)", display: "grid", gridTemplateColumns: "260px minmax(420px, 1fr) 430px", gap: 16 }}>
-      <aside style={panel({ padding: 12, overflow: "auto" })}>
-        <EpisodeStepper activeEpisode={activeEpisode} maxEpisode={maxEpisode} onChange={onEpisodeChange} />
-        <div style={{ height: 12 }} />
-        <ShotList shots={shots} activeId={activeShot?.id ?? null} onSelect={setActiveShotId} />
-      </aside>
-      <section style={panel({ display: "grid", gridTemplateRows: "1fr 190px", overflow: "hidden" })}>
-        <div style={{ background: C.band, display: "grid", placeItems: "center", overflow: "hidden" }}>
-          {activeShot?.videoUrl ? <video src={activeShot.videoUrl} controls style={{ width: "100%", height: "100%", objectFit: "contain" }} /> :
-            activeShot?.cameraDiagramUrl ? <img src={activeShot.cameraDiagramUrl} alt="机位示意图" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> :
-              activeShot?.storyboardSketchUrl ? <img src={activeShot.storyboardSketchUrl} alt="分镜草图" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> :
-                <Play size={42} style={{ color: C.dim }} />}
+    <div style={{ height: "calc(100vh - 64px)", padding: 18, display: "grid", gridTemplateColumns: "250px minmax(520px, 1fr) 330px", gap: 14, overflow: "hidden" }}>
+      <aside style={card({ padding: 12, minHeight: 0, overflow: "auto" })}>
+        <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 10 }}>集数 / 视频段</div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
+          {episodeNumbers.map((episode) => (
+            <button key={episode} onClick={() => onActiveEpisode(episode)} style={pill(activeEpisode === episode)}>第{episode}集</button>
+          ))}
         </div>
-        <div style={{ borderTop: `1px solid ${C.line}`, padding: 12, overflow: "auto" }}>
-          <div style={{ fontSize: 13, fontWeight: 900 }}>{activeShot ? `镜头 ${activeShot.episodeNumber}.${activeShot.shotNumber}` : "未选择镜头"}</div>
-          <div style={{ color: C.sub, fontSize: 12, lineHeight: 1.55, marginTop: 6 }}>{activeShot?.visualDescription || "暂无镜头描述"}</div>
+        <div style={{ display: "grid", gap: 8 }}>
+          {segments.map((segment) => (
+            <div key={segment.id}>
+              <button onClick={() => onActiveSegment(segment.id)} style={{
+                ...card({
+                  width: "100%",
+                  padding: 10,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  borderColor: currentSegment?.id === segment.id ? "#d8ccff" : C.line,
+                  background: currentSegment?.id === segment.id ? C.purpleSoft : C.panel,
+                }),
+              }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <strong style={{ fontSize: 13 }}>视频段 {String(segment.segmentNumber).padStart(2, "0")}</strong>
+                  <span style={tinyLabel(C.purple)}>{segment.duration}s</span>
+                </div>
+                <div style={{ ...tinyLabel(), marginTop: 5 }}>包含 {segment.shots.length} 个分镜</div>
+              </button>
+              {currentSegment?.id === segment.id && (
+                <div style={{ margin: "6px 0 2px 12px", display: "grid", gap: 5 }}>
+                  {segment.shots.map((shot) => (
+                    <button key={shot.id} onClick={() => setActiveShotId(shot.id)} style={{
+                      border: "none",
+                      background: activeShot?.id === shot.id ? "#fff" : "transparent",
+                      borderRadius: 7,
+                      padding: "7px 8px",
+                      textAlign: "left",
+                      color: activeShot?.id === shot.id ? C.text : C.sub,
+                      cursor: "pointer",
+                      fontSize: 12,
+                    }}>
+                      分镜 {shot.shotNumber} · {shot.sceneName || "未命名场景"}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+          {segments.length === 0 && <Empty title="还没有分镜。先到“剧本分集”生成分镜设计。" icon={<Clapperboard size={34} />} />}
+        </div>
+      </aside>
+      <section style={{ minHeight: 0, display: "grid", gridTemplateRows: "auto 160px 1fr", gap: 12 }}>
+        <div style={card({ padding: 14 })}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <div>
+              <h1 style={{ margin: 0, fontSize: 18 }}>视频段 {currentSegment ? `${String(currentSegment.segmentNumber).padStart(2, "0")} · ${currentSegment.duration}s` : "--"}</h1>
+              <div style={{ ...tinyLabel(), marginTop: 5 }}>几个分镜镜头合成一条 15 秒左右 Seedance 2.0 提示词。</div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <Button variant="outline" disabled={!activeShot || generateStoryboard.isPending} onClick={() => activeShot && generateStoryboard.mutate({ shotId: activeShot.id, imageEngine: "image2", addToAssetLibrary: false })} style={{ borderColor: C.line, borderRadius: 8 }}>
+                {generateStoryboard.isPending ? <Loader2 className="animate-spin" size={14} /> : <ImageIcon size={14} />}
+                分镜草图
+              </Button>
+              <Button variant="outline" disabled={!activeShot || generateDiagram.isPending} onClick={() => activeShot && generateDiagram.mutate({ shotId: activeShot.id, imageEngine: "image2", addToAssetLibrary: false })} style={{ borderColor: C.line, borderRadius: 8 }}>
+                {generateDiagram.isPending ? <Loader2 className="animate-spin" size={14} /> : <Camera size={14} />}
+                机位图
+              </Button>
+            </div>
+          </div>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(1, currentSegment?.shots.length ?? 1)}, minmax(120px, 1fr))`, gap: 10, minHeight: 0 }}>
+          {(currentSegment?.shots ?? []).map((shot) => (
+            <button key={shot.id} onClick={() => setActiveShotId(shot.id)} style={{ ...card({ padding: 8, cursor: "pointer", textAlign: "left", borderColor: activeShot?.id === shot.id ? "#d8ccff" : C.line }) }}>
+              <div style={{ height: 82, background: C.panelSoft, borderRadius: 7, overflow: "hidden", display: "grid", placeItems: "center" }}>
+                {shot.storyboardSketchUrl ? <img src={shot.storyboardSketchUrl} alt="分镜草图" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <ImageIcon size={22} style={{ color: C.dim }} />}
+              </div>
+              <div style={{ fontSize: 12, fontWeight: 900, marginTop: 7 }}>分镜 {shot.shotNumber}</div>
+              <div style={{ ...tinyLabel(C.dim), marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shot.visualDescription || "暂无描述"}</div>
+            </button>
+          ))}
+          {!currentSegment && <Empty title="暂无视频段" icon={<GalleryHorizontal size={34} />} />}
+        </div>
+        <div style={{ minHeight: 0, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+          <section style={card({ padding: 14, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr", gap: 10 })}>
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 900 }}>当前分镜</div>
+              <div style={tinyLabel()}>动作、台词、情绪和表演留白</div>
+            </div>
+            {activeShot ? (
+              <div style={{ minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 10 }}>
+                <InfoLine label="场景" value={activeShot.sceneName || "未命名场景"} />
+                <InfoLine label="人物" value={activeShot.characters || "未指定"} />
+                <InfoLine label="台词" value={activeShot.dialogue || "无台词"} />
+                <InfoLine label="情绪" value={activeShot.emotion || "未指定"} />
+                <div style={{ ...tinyLabel(C.text), whiteSpace: "pre-wrap", lineHeight: 1.7, background: C.panelSoft, borderRadius: 8, padding: 12 }}>{activeShot.visualDescription || "暂无镜头描述"}</div>
+              </div>
+            ) : <Empty title="选择一个视频段或分镜" icon={<FileText size={34} />} />}
+          </section>
+          <section style={card({ padding: 0, minHeight: 0, display: "grid", gridTemplateRows: "1fr auto", overflow: "hidden" })}>
+            <div style={{ background: C.panelSoft, display: "grid", placeItems: "center", overflow: "hidden" }}>
+              {segmentLead?.videoUrl ? (
+                <video src={segmentLead.videoUrl} controls style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+              ) : previewImage ? (
+                <img src={previewImage} alt="预览" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+              ) : (
+                <div style={{ textAlign: "center", color: C.dim }}>
+                  <Play size={36} />
+                  <div style={{ marginTop: 8, fontSize: 12 }}>视频预览 / 分镜图 / 机位图</div>
+                </div>
+              )}
+            </div>
+            <SeedanceComposer
+              disabled={!project || !currentSegment}
+              prompt={segmentPrompt}
+              onPrompt={setSegmentPrompt}
+              duration={duration}
+              onDuration={setDuration}
+              tags={referenceTags}
+              isPrompting={generateSegmentPrompt.isPending}
+              isGenerating={generateVideo.isPending}
+              onGeneratePrompt={() => {
+                if (!project || !currentSegment) return;
+                generateSegmentPrompt.mutate({
+                  projectId: project.id,
+                  shotIds: currentSegment.shots.map((shot) => shot.id),
+                  referenceAssetIds: selectedAssetIds,
+                  duration,
+                });
+              }}
+              onGenerateVideo={() => {
+                if (!segmentLead) return;
+                generateVideo.mutate({
+                  shotId: segmentLead.id,
+                  prompt: segmentPrompt,
+                  referenceImageUrls: referenceUrls,
+                  duration,
+                  aspectRatio: project?.aspectRatio === "landscape" ? "16:9" : "9:16",
+                });
+              }}
+            />
+          </section>
         </div>
       </section>
-      <aside style={panel({ padding: 14, overflow: "auto" })}>
-        <h2 style={{ margin: "0 0 12px", fontSize: 16 }}>Seedance 2.0</h2>
-        {activeShot ? (
-          <div style={{ display: "grid", gap: 12 }}>
-            <div>
-              <div style={{ color: C.dim, fontSize: 11, marginBottom: 6 }}>参考图 @{refUrls.length}/9</div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
-                {imageAssets.slice(0, 16).map((asset) => {
-                  const checked = selectedAssetIds.includes(asset.id);
-                  return (
-                    <button key={asset.id} title={asset.name} onClick={() => setSelectedAssetIds((prev) => checked ? prev.filter((id) => id !== asset.id) : [...prev, asset.id].slice(0, 9))} style={{
-                      height: 58,
-                      borderRadius: 6,
-                      overflow: "hidden",
-                      padding: 0,
-                      border: `2px solid ${checked ? C.gold : C.line}`,
-                      background: C.band,
-                      cursor: "pointer",
-                    }}>
-                      <img src={assetImage(asset)!} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-            <Select value={String(duration)} onValueChange={(value) => setDuration(Number(value))}>
-              <SelectTrigger style={field()}><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {[6, 8, 10, 12, 15].map((value) => <SelectItem key={value} value={String(value)}>{value} 秒</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Button variant="outline" disabled={generatePrompt.isPending} onClick={() => generatePrompt.mutate({ shotId: activeShot.id, referenceAssetIds: selectedAssetIds, duration })} style={{ borderColor: C.line2, color: C.sub }}>
-              {generatePrompt.isPending ? <Loader2 className="animate-spin" size={14} /> : <Wand2 size={14} />} 生成视频提示词
-            </Button>
-            <Textarea ref={promptRef} key={activeShot.id + (activeShot.videoPrompt || "")} defaultValue={activeShot.videoPrompt || ""} rows={10} style={{ ...field(), lineHeight: 1.6 }} />
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <Button variant="outline" disabled={generateDiagram.isPending} onClick={() => generateDiagram.mutate({ shotId: activeShot.id, imageEngine: "image2", addToAssetLibrary: false })} style={{ borderColor: C.line2, color: C.sub }}>
-                {generateDiagram.isPending ? <Loader2 className="animate-spin" size={14} /> : <Camera size={14} />} 机位图
-              </Button>
-              <Button variant="outline" disabled={!activeShot.cameraDiagramUrl || addVisual.isPending} onClick={() => addVisual.mutate({ shotId: activeShot.id, kind: "camera_diagram" })} style={{ borderColor: C.line2, color: C.sub }}>
-                <Plus size={14} /> 加资产
-              </Button>
-            </div>
-            <Button disabled={generateVideo.isPending} onClick={() => generateVideo.mutate({ shotId: activeShot.id, prompt: promptRef.current?.value || activeShot.videoPrompt || "", referenceImageUrls: refUrls, duration, aspectRatio: project.aspectRatio === "landscape" ? "16:9" : "9:16" })} style={{ background: C.gold, color: C.bg, fontWeight: 900, height: 42 }}>
-              {generateVideo.isPending ? <Loader2 className="animate-spin" size={15} /> : <Play size={15} />} 生成视频
-            </Button>
-            {activeShot.videoPrompt && (
-              <Button variant="outline" onClick={() => navigator.clipboard.writeText(promptRef.current?.value || activeShot.videoPrompt || "")} style={{ borderColor: C.line2, color: C.sub }}>
-                <Copy size={14} /> 复制提示词
-              </Button>
-            )}
-          </div>
-        ) : <div style={{ color: C.dim, fontSize: 13 }}>暂无镜头</div>}
+      <aside style={card({ padding: 14, minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr auto", gap: 12 })}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 900 }}>当前视频段引用资产</div>
+          <div style={tinyLabel()}>从资产库选择固定人物、场景、服装、道具参考。</div>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {referenceTags.map((tag) => <span key={tag} style={pill(true)}>{tag}</span>)}
+          {referenceTags.length === 0 && <span style={pill()}>暂无引用</span>}
+        </div>
+        <div style={{ minHeight: 0, overflow: "auto", display: "grid", gap: 8, alignContent: "start" }}>
+          {imageAssets.map((asset) => {
+            const selected = selectedAssetIds.includes(asset.id);
+            return (
+              <button
+                key={asset.id}
+                onClick={() => setSelectedAssetIds((prev) => selected ? prev.filter((id) => id !== asset.id) : [...prev, asset.id].slice(0, 9))}
+                style={{ ...card({ padding: 8, display: "grid", gridTemplateColumns: "46px 1fr", gap: 10, cursor: "pointer", textAlign: "left", borderColor: selected ? "#d8ccff" : C.line, background: selected ? C.purpleSoft : C.panel }) }}
+              >
+                <div style={{ width: 46, height: 46, borderRadius: 7, background: C.panelSoft, overflow: "hidden", display: "grid", placeItems: "center" }}>
+                  <img src={assetImage(asset)!} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.name}</div>
+                  <div style={{ ...tinyLabel(C.purple), marginTop: 4 }}>{assetTag(asset)}</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <Button variant="outline" disabled={!activeShot?.storyboardSketchUrl || addVisual.isPending} onClick={() => activeShot && addVisual.mutate({ shotId: activeShot.id, kind: "storyboard" })} style={{ borderColor: C.line, borderRadius: 8 }}>
+            <Plus size={14} /> 分镜入库
+          </Button>
+          <Button variant="outline" disabled={!activeShot?.cameraDiagramUrl || addVisual.isPending} onClick={() => activeShot && addVisual.mutate({ shotId: activeShot.id, kind: "camera_diagram" })} style={{ borderColor: C.line, borderRadius: 8 }}>
+            <Plus size={14} /> 机位入库
+          </Button>
+        </div>
       </aside>
+    </div>
+  );
+}
+
+function SeedanceComposer({
+  disabled,
+  prompt,
+  onPrompt,
+  duration,
+  onDuration,
+  tags,
+  isPrompting,
+  isGenerating,
+  onGeneratePrompt,
+  onGenerateVideo,
+}: {
+  disabled: boolean;
+  prompt: string;
+  onPrompt: (prompt: string) => void;
+  duration: number;
+  onDuration: (duration: number) => void;
+  tags: string[];
+  isPrompting: boolean;
+  isGenerating: boolean;
+  onGeneratePrompt: () => void;
+  onGenerateVideo: () => void;
+}) {
+  return (
+    <div style={{ borderTop: `1px solid ${C.line}`, padding: 12, background: "#fff" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+        {tags.slice(0, 8).map((tag) => <span key={tag} style={pill(true)}>{tag}</span>)}
+      </div>
+      <Textarea
+        value={prompt}
+        onChange={(event) => onPrompt(event.target.value)}
+        placeholder="描述这个视频段，或生成 15 秒 Seedance 2.0 提示词..."
+        rows={5}
+        style={{ ...field(), resize: "none", lineHeight: 1.6 }}
+      />
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+        <button style={pill()}><Plus size={13} /></button>
+        <button style={pill(true)}><Film size={13} /> 视频 2.0</button>
+        <button style={pill(true)}><Sparkles size={13} /> Seedance 2.0</button>
+        <button style={pill()}><AtSign size={13} /> 资产</button>
+        <button style={pill()}><ImageIcon size={13} /> 分镜图</button>
+        <button style={pill()}><Camera size={13} /> 机位图</button>
+        <Select value={String(duration)} onValueChange={(value) => onDuration(Number(value))}>
+          <SelectTrigger style={{ ...field(), width: 92, height: 30, fontSize: 12 }}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {[8, 10, 12, 15].map((value) => <SelectItem key={value} value={String(value)}>{value}s</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Button variant="outline" disabled={disabled || isPrompting} onClick={onGeneratePrompt} style={{ borderColor: C.line, borderRadius: 999, height: 32 }}>
+          {isPrompting ? <Loader2 className="animate-spin" size={14} /> : <Wand2 size={14} />}
+          生成15秒提示词
+        </Button>
+        <Button disabled={disabled || !prompt.trim() || isGenerating} onClick={onGenerateVideo} style={{ background: C.ink, color: "#fff", borderRadius: 999, height: 34, marginLeft: "auto" }}>
+          {isGenerating ? <Loader2 className="animate-spin" size={14} /> : <ArrowUp size={14} />}
+          生成
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function GenerationRecordsView({ project, shots }: { project?: Project; shots: Shot[] }) {
+  const records = shots.flatMap((shot) => [
+    shot.storyboardSketchUrl ? { type: "分镜草图", shot, status: "成功", result: shot.storyboardSketchUrl } : null,
+    shot.cameraDiagramUrl ? { type: "机位图", shot, status: "成功", result: shot.cameraDiagramUrl } : null,
+    shot.videoPrompt ? { type: "15秒提示词", shot, status: "成功", result: null } : null,
+    shot.videoUrl ? { type: "Seedance视频", shot, status: "成功", result: shot.videoUrl } : null,
+    shot.status === "failed" ? { type: "生成任务", shot, status: "失败", result: null } : null,
+  ].filter(Boolean)) as Array<{ type: string; shot: Shot; status: string; result: string | null }>;
+
+  return (
+    <div style={{ height: "calc(100vh - 64px)", padding: 22, display: "grid", gridTemplateColumns: "1fr 340px", gap: 16, overflow: "hidden" }}>
+      <section style={card({ padding: 18, minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr", gap: 14 })}>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 20 }}>生成记录</h1>
+          <div style={tinyLabel()}>轻量任务记录：查看、重试、复制提示词、加入资产库。</div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {["全部", "分集", "分镜草图", "机位图", "15秒提示词", "Seedance视频", "失败"].map((item) => <span key={item} style={pill(item === "全部")}>{item}</span>)}
+        </div>
+        <div style={{ minHeight: 0, overflow: "auto", display: "grid", gap: 10, alignContent: "start" }}>
+          {records.map((record, index) => (
+            <div key={`${record.type}-${record.shot.id}-${index}`} style={card({ padding: 12, display: "grid", gridTemplateColumns: "140px 1fr 72px 86px", alignItems: "center", gap: 12 })}>
+              <div>
+                <strong style={{ fontSize: 13 }}>{record.type}</strong>
+                <div style={{ ...tinyLabel(C.dim), marginTop: 4 }}>EP{record.shot.episodeNumber} · 分镜{record.shot.shotNumber}</div>
+              </div>
+              <div style={{ ...tinyLabel(), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{record.shot.visualDescription || record.shot.videoPrompt || "暂无摘要"}</div>
+              <span style={pill(record.status === "成功")}>{record.status}</span>
+              <Button variant="outline" size="sm" onClick={() => copy(record.shot.videoPrompt || record.shot.storyboardPrompt || record.shot.cameraDiagramPrompt)} style={{ borderColor: C.line, borderRadius: 8 }}>
+                <Copy size={13} /> 复制
+              </Button>
+            </div>
+          ))}
+          {records.length === 0 && <Empty title={project ? "还没有生成记录。" : "请先选择项目。"} icon={<Clock size={36} />} />}
+        </div>
+      </section>
+      <aside style={card({ padding: 16, alignSelf: "start" })}>
+        <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 10 }}>当前策略</div>
+        <div style={{ ...tinyLabel(), lineHeight: 1.7 }}>
+          第一版不做复杂版本管理。分镜草图、机位图和视频结果都可以回流资产库；失败任务提供重试入口，完整任务表会在下一阶段接入。
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function InfoLine({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div style={tinyLabel(C.dim)}>{label}</div>
+      <div style={{ fontSize: 13, marginTop: 4, lineHeight: 1.55 }}>{value}</div>
+    </div>
+  );
+}
+
+function Empty({ title, icon }: { title: string; icon: ReactNode }) {
+  return (
+    <div style={{ minHeight: 220, display: "grid", placeItems: "center", color: C.dim, textAlign: "center" }}>
+      <div>
+        <div style={{ display: "flex", justifyContent: "center", marginBottom: 10 }}>{icon}</div>
+        <div style={{ fontSize: 13 }}>{title}</div>
+      </div>
     </div>
   );
 }

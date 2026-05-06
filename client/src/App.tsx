@@ -1,4 +1,3 @@
-// DESIGN: "鎏光机" 导演手册工业风暗色系
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
@@ -25,7 +24,7 @@ function Router() {
 function App() {
   return (
     <ErrorBoundary>
-      <ThemeProvider defaultTheme="dark">
+      <ThemeProvider defaultTheme="light">
         <ProjectManagerProvider>
           <ProjectProvider>
             <TooltipProvider>

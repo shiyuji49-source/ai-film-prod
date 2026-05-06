@@ -107,6 +107,13 @@ const premiumVideoPromptSchema = z.object({
   duration: z.number().int().min(4).max(15).default(15),
 });
 
+const premiumVideoSegmentPromptSchema = z.object({
+  projectId: z.number().int(),
+  shotIds: z.array(z.number().int()).min(1).max(6),
+  referenceAssetIds: z.array(z.number().int()).max(9).optional(),
+  duration: z.number().int().min(8).max(15).default(15),
+});
+
 const premiumVideoSchema = z.object({
   shotId: z.number().int(),
   prompt: z.string().optional(),
@@ -2578,6 +2585,88 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
         .where(eq(scriptShots.id, shot.id));
 
       return { shotId: shot.id, prompt, referenceImageUrls };
+    }),
+
+  // ── 精品剧：多个分镜合成一个 15 秒 Seedance 2.0 视频段提示词 ───────────────
+  generateVideoSegmentPrompt: protectedProcedure
+    .input(premiumVideoSegmentPromptSchema)
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      const [project] = await db!
+        .select()
+        .from(overseasProjects)
+        .where(and(eq(overseasProjects.id, input.projectId), eq(overseasProjects.userId, ctx.user.id)));
+      if (!project) throw new Error("Project not found");
+
+      const allProjectShots = await db!
+        .select()
+        .from(scriptShots)
+        .where(and(eq(scriptShots.projectId, input.projectId), eq(scriptShots.userId, ctx.user.id)))
+        .orderBy(scriptShots.episodeNumber, scriptShots.shotNumber);
+      const shotIdSet = new Set(input.shotIds);
+      const shots = allProjectShots.filter((shot) => shotIdSet.has(shot.id));
+      if (shots.length === 0) throw new Error("未找到可用于合成视频段的分镜");
+
+      let assets = await db!.select().from(overseasAssets).where(
+        and(eq(overseasAssets.projectId, input.projectId), eq(overseasAssets.userId, ctx.user.id))
+      );
+      if (input.referenceAssetIds?.length) {
+        const ids = new Set(input.referenceAssetIds);
+        assets = assets.filter((asset) => ids.has(asset.id));
+      }
+
+      const referenceImages: Seedance2ReferenceImage[] = assets
+        .map((asset) => {
+          const url = assetImageUrl(asset);
+          if (!url) return null;
+          return { role: assetReferenceRole(asset), url, name: asset.name };
+        })
+        .filter((item): item is Seedance2ReferenceImage => !!item)
+        .slice(0, 9);
+
+      const firstShot = shots[0];
+      const combinedShot: ShotInfo = {
+        shotNumber: firstShot.shotNumber,
+        sceneName: Array.from(new Set(shots.map((shot) => shot.sceneName).filter(Boolean))).join(" / ") || firstShot.sceneName || "",
+        shotType: "video segment composed from multiple storyboard shots",
+        visualDescription: shots
+          .map((shot, index) => {
+            const dialogue = shot.dialogue ? ` 台词：${shot.dialogue}` : "";
+            const emotion = shot.emotion ? ` 情绪：${shot.emotion}` : "";
+            return `分镜${index + 1}（EP${shot.episodeNumber}-${shot.shotNumber}）：${shot.visualDescription || ""}${dialogue}${emotion}`;
+          })
+          .join("\n"),
+        dialogue: shots.map((shot) => shot.dialogue).filter(Boolean).join("\n") || undefined,
+        characters: Array.from(new Set(shots.map((shot) => shot.characters).filter(Boolean))).join("、") || undefined,
+        emotion: Array.from(new Set(shots.map((shot) => shot.emotion).filter(Boolean))).join("、") || undefined,
+        duration: input.duration,
+      };
+
+      const prompt = await generateSeedance2Prompt(
+        combinedShot,
+        referenceImages,
+        {
+          projectDefinition: project.definition,
+          projectBible: project.projectBible,
+          visualStylePreset: project.visualStylePreset,
+          styleEnhancers: parseStyleEnhancers(project.styleEnhancers),
+          visualStylePrompt: resolveProjectVisualStyle(project),
+          aspectRatio: project.aspectRatio === "portrait" ? "9:16" : "16:9",
+        }
+      );
+      const referenceImageUrls = referenceImages.map((item) => item.url);
+
+      await db!
+        .update(scriptShots)
+        .set({
+          videoPrompt: prompt,
+          subjectRefUrls: JSON.stringify(referenceImageUrls),
+          videoDuration: input.duration,
+          videoEngine: "seedance_2_0",
+        })
+        .where(and(eq(scriptShots.id, firstShot.id), eq(scriptShots.userId, ctx.user.id)));
+
+      return { shotId: firstShot.id, shotIds: shots.map((shot) => shot.id), prompt, referenceImageUrls };
     }),
 
   // ── 精品剧：生成 15 秒调度与机位示意图（image2）───────────────────────────
