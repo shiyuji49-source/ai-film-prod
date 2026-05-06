@@ -17,6 +17,7 @@
  */
 import { callLLM } from "./llm-service";
 import { buildVisualStylePrompt, getVisualStylePreset } from "../../shared/visualStyles";
+import { parseLlmJson } from "../lib/llm-json";
 
 // ─── 共用类型 ──────────────────────────────────────────────────────────────────
 
@@ -450,7 +451,7 @@ ${script.slice(0, 80000)}
     temperature: 0.65,
   });
 
-  return JSON.parse(response) as ProjectBible;
+  return parseLlmJson<ProjectBible>(response, "项目导演规则");
 }
 
 /**
@@ -524,7 +525,7 @@ ${script.slice(0, 50000)}
     temperature: 0.7,
   });
 
-  return JSON.parse(response) as DirectorAnalysis;
+  return parseLlmJson<DirectorAnalysis>(response, "导演分析");
 }
 
 /**
@@ -680,7 +681,7 @@ ${refList || "（无参考图）"}
   });
 
   try {
-    const parsed = JSON.parse(response) as { finalPrompt?: string };
+    const parsed = parseLlmJson<{ finalPrompt?: string }>(response, "Seedance 2.0 提示词");
     return (parsed.finalPrompt || response).trim();
   } catch {
     return response.trim();
@@ -817,7 +818,7 @@ ${sceneContext || "（未提供）"}
     temperature: 0.7,
   });
 
-  return JSON.parse(response) as FramePrompts;
+  return parseLlmJson<FramePrompts>(response, "首尾帧提示词");
 }
 
 // ─── 跑量剧：运动提示词 ────────────────────────────────────────────────────────

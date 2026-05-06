@@ -23,6 +23,7 @@ import {
 import { ENV } from "../_core/env";
 import { buildVisualStylePrompt, getVisualStylePreset, validateStyleEnhancers } from "../../shared/visualStyles";
 import pLimit from "p-limit";
+import { parseLlmJson } from "../lib/llm-json";
 
 // ─── 项目 CRUD ────────────────────────────────────────────────────────────────
 
@@ -216,6 +217,62 @@ function parseStyleEnhancers(value?: string | null): string[] {
 
 function resolveProjectVisualStyle(project: typeof overseasProjects.$inferSelect, styleEnhancers = parseStyleEnhancers(project.styleEnhancers)) {
   return project.visualStylePrompt?.trim() || buildVisualStylePrompt(getVisualStylePreset(project.visualStylePreset), styleEnhancers);
+}
+
+function parseEpisodeNumber(value?: string | null) {
+  if (!value) return null;
+  if (/^\d+$/.test(value)) return Number(value);
+  const digits: Record<string, number> = {
+    零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9,
+  };
+  if (value === "十") return 10;
+  const tenIndex = value.indexOf("十");
+  if (tenIndex >= 0) {
+    const left = value.slice(0, tenIndex);
+    const right = value.slice(tenIndex + 1);
+    return (left ? digits[left] ?? 0 : 1) * 10 + (right ? digits[right] ?? 0 : 0);
+  }
+  return digits[value] ?? null;
+}
+
+function splitScriptLocally(scriptText: string) {
+  const normalized = scriptText.replace(/\r\n/g, "\n").trim();
+  const pattern = /(?:^|\n)\s*(?:第\s*([一二两三四五六七八九十百\d]+)\s*[集话]|EP(?:ISODE)?\.?\s*(\d+)|Episode\s*(\d+))\s*[:：、.\-\s]*([^\n]*)/gi;
+  const matches = Array.from(normalized.matchAll(pattern));
+  if (matches.length > 0) {
+    return matches.map((match, index) => {
+      const markerStart = match.index ?? 0;
+      const nextStart = index + 1 < matches.length ? matches[index + 1].index ?? normalized.length : normalized.length;
+      const fullBlock = normalized.slice(markerStart, nextStart).trim();
+      const firstLineEnd = fullBlock.indexOf("\n");
+      const firstLine = firstLineEnd >= 0 ? fullBlock.slice(0, firstLineEnd) : fullBlock;
+      const scriptBlock = firstLineEnd >= 0 ? fullBlock.slice(firstLineEnd + 1).trim() : fullBlock;
+      const parsedNumber = parseEpisodeNumber(match[1] || match[2] || match[3]);
+      return {
+        episodeNumber: parsedNumber ?? index + 1,
+        title: (match[4]?.trim() || firstLine.trim() || `第 ${index + 1} 集`).slice(0, 80),
+        scriptText: scriptBlock.length >= 10 ? scriptBlock : fullBlock,
+      };
+    }).filter((episode) => episode.scriptText.length >= 10);
+  }
+
+  const paragraphs = normalized.split(/\n{2,}/).map((item) => item.trim()).filter(Boolean);
+  if (paragraphs.length <= 1 || normalized.length <= 8000) {
+    return [{ episodeNumber: 1, title: "第 1 集", scriptText: normalized }];
+  }
+  const episodes: Array<{ episodeNumber: number; title: string; scriptText: string }> = [];
+  let buffer = "";
+  for (const paragraph of paragraphs) {
+    if (buffer && buffer.length + paragraph.length > 6000) {
+      episodes.push({ episodeNumber: episodes.length + 1, title: `第 ${episodes.length + 1} 集`, scriptText: buffer.trim() });
+      buffer = "";
+    }
+    buffer += `${paragraph}\n\n`;
+  }
+  if (buffer.trim()) {
+    episodes.push({ episodeNumber: episodes.length + 1, title: `第 ${episodes.length + 1} 集`, scriptText: buffer.trim() });
+  }
+  return episodes;
 }
 
 export const overseasRouter = router({
@@ -485,9 +542,9 @@ Important: Return ONLY the JSON array, no markdown, no explanation.`;
           visualDescription: string; dialogue: string; characters: string; emotion: string; durationSec?: number;
         }>;
         try {
-          shots = JSON.parse(response);
-        } catch {
-          await db!.update(batchJobs).set({ status: "done", failed: 1, errorMsg: "AI 返回格式错误" }).where(eq(batchJobs.id, jobId));
+          shots = parseLlmJson(response, "分镜设计");
+        } catch (err) {
+          await db!.update(batchJobs).set({ status: "done", failed: 1, errorMsg: (err as Error).message }).where(eq(batchJobs.id, jobId));
           return;
         }
 
@@ -1310,7 +1367,7 @@ ${scriptSummary || "暂无分镜背景"}
           },
         },
       });
-      const parsed = JSON.parse(res) as { assets: Array<{ assetPrompt: string; mainWeight: string; supportingWeight: string; continuityRule: string; variationRule: string; conflictCheck: string; priority: string; status: string; usedInEpisodes: string }> };
+      const parsed = parseLlmJson<{ assets: Array<{ assetPrompt: string; mainWeight: string; supportingWeight: string; continuityRule: string; variationRule: string; conflictCheck: string; priority: string; status: string; usedInEpisodes: string }> }>(res, "资产提示词");
       const next = parsed.assets[0];
       const mjPrompt = next.assetPrompt.trim();
       if (mjPrompt) {
@@ -1580,7 +1637,7 @@ ${scriptSummary || "暂无分镜背景"}
         let scenePrompts: { view1: string; view2: string; view3: string; view4: string } | null = null;
         try {
           const llmRaw = await callLLM({ prompt: llmScenePrompt });
-          scenePrompts = JSON.parse(llmRaw) as { view1: string; view2: string; view3: string; view4: string };
+          scenePrompts = parseLlmJson(llmRaw, "场景多视角提示词");
         } catch { /* 降级为固定模板 */ }
         const baseScene = `${asset.name}${sceneDesc ? ", " + sceneDesc : ""}`;
         const sceneViews: Array<{ field: string; prompt: string }> = [
@@ -1670,9 +1727,12 @@ ${input.scriptText.slice(0, 120000)}
         },
       });
 
-      const parsed = JSON.parse(response) as {
-        episodes: Array<{ episodeNumber: number; title: string; scriptText: string }>;
-      };
+      let parsed: { episodes: Array<{ episodeNumber: number; title: string; scriptText: string }> };
+      try {
+        parsed = parseLlmJson(response, "智能分集");
+      } catch {
+        parsed = { episodes: splitScriptLocally(input.scriptText) };
+      }
       const episodes = parsed.episodes
         .filter((ep) => ep.episodeNumber > 0 && ep.scriptText.trim().length >= 10)
         .sort((a, b) => a.episodeNumber - b.episodeNumber);
@@ -1769,8 +1829,7 @@ Return ONLY the JSON array.`;
               visualDescription: string; dialogue: string; characters: string; emotion: string; durationSec?: number;
             }>;
             try {
-              const cleaned = response.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-              shots = JSON.parse(cleaned);
+              shots = parseLlmJson(response, "分镜设计");
             } catch {
               failed++;
               continue;
@@ -1886,8 +1945,7 @@ ${scriptText.slice(0, 80000)}
         },
       });
 
-      const content = response;
-      const parsed = JSON.parse(content) as {
+      const parsed = parseLlmJson<{
         assets: Array<{
           type: "character" | "scene" | "costume" | "prop" | "custom";
           name: string;
@@ -1901,7 +1959,7 @@ ${scriptText.slice(0, 80000)}
           usedInEpisodes: string;
           conflictCheck: string;
         }>;
-      };
+      }>(response, "资产识别");
 
       // 获取已有资产名称，避免重复
       const existingAssets = await db!.select().from(overseasAssets)
@@ -1991,8 +2049,7 @@ Rules:
       const content = response;
       let detectedAssets: Array<{ type: "character" | "scene"; name: string; description: string; tags: string }>;
       try {
-        const cleaned = content.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-        detectedAssets = JSON.parse(cleaned);
+        detectedAssets = parseLlmJson(content, "资产识别");
       } catch {
         throw new Error("AI asset detection failed to return valid JSON");
       }
@@ -2430,7 +2487,7 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
               let scenePrompts: { view1: string; view2: string; view3: string; view4: string } | null = null;
               try {
                 const llmRaw = await callLLM({ prompt: llmScenePrompt });
-                scenePrompts = JSON.parse(llmRaw) as { view1: string; view2: string; view3: string; view4: string };
+                scenePrompts = parseLlmJson(llmRaw, "场景多视角提示词");
               } catch { /* 降级为固定模板 */ }
               const baseScene = `${asset.name}${sceneDesc ? ", " + sceneDesc : ""}`;
               const sceneViews: Array<{ field: string; prompt: string }> = [
