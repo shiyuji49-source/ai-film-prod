@@ -21,6 +21,7 @@ import {
   Film,
   FolderOpen,
   GalleryHorizontal,
+  Home,
   ImageIcon,
   KeyRound,
   Layers,
@@ -131,7 +132,7 @@ type SplitEpisode = {
   scriptText: string;
 };
 
-type ModuleKey = "definition" | "script" | "rules" | "assets" | "shots" | "records";
+type ModuleKey = "overview" | "definition" | "script" | "rules" | "assets" | "shots" | "records";
 
 type VideoSegment = {
   id: string | number;
@@ -150,6 +151,7 @@ type VideoSegment = {
 };
 
 const navItems: Array<{ key: ModuleKey; label: string; icon: ReactNode }> = [
+  { key: "overview", label: "总览", icon: <Home size={16} /> },
   { key: "definition", label: "项目定义", icon: <Film size={16} /> },
   { key: "script", label: "剧本分集", icon: <FileText size={16} /> },
   { key: "rules", label: "导演规则", icon: <Lock size={16} /> },
@@ -359,7 +361,7 @@ function LoadingScreen() {
 
 function StudioShell() {
   const [activeProjectId, setActiveProjectId] = useState<number | null>(null);
-  const [module, setModule] = useState<ModuleKey>("definition");
+  const [module, setModule] = useState<ModuleKey>("overview");
   const [scriptText, setScriptText] = useState("");
   const [episodes, setEpisodes] = useState<SplitEpisode[]>([]);
   const [activeEpisode, setActiveEpisode] = useState(1);
@@ -373,6 +375,12 @@ function StudioShell() {
   const projects = (projectsQuery.data ?? []) as Project[];
   const project = projectQuery.data?.project as Project | undefined;
   const shots = (projectQuery.data?.shots ?? []) as Shot[];
+  const segmentsQuery = trpc.overseas.listVideoSegments.useQuery(
+    { projectId: activeProjectId! },
+    { enabled: activeProjectId !== null && shots.length > 0, refetchOnWindowFocus: false }
+  );
+  const formalSegments = (segmentsQuery.data ?? []) as VideoSegment[];
+  const videoSegmentCount = formalSegments.length || buildSegments(shots).length;
 
   useEffect(() => {
     if (!activeProjectId && projects.length > 0) setActiveProjectId(projects[0].id);
@@ -404,10 +412,18 @@ function StudioShell() {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={pill(Boolean(project))}>{project ? "已连接项目" : "等待创建"}</span>
             <span style={pill()}>{shots.length} 个分镜</span>
-            <span style={pill()}>{Math.max(0, buildSegments(shots).length)} 个视频段</span>
+            <span style={pill()}>{videoSegmentCount} 个视频段</span>
           </div>
         </header>
         <section style={{ minHeight: 0, overflow: "hidden" }}>
+          {module === "overview" && (
+            <OverviewView
+              project={project}
+              shots={shots}
+              videoSegmentCount={videoSegmentCount}
+              onModule={setModule}
+            />
+          )}
           {module === "definition" && (
             <DefinitionView
               project={project}
@@ -535,6 +551,184 @@ function Sidebar({
         </div>
       </section>
     </aside>
+  );
+}
+
+function OverviewView({
+  project,
+  shots,
+  videoSegmentCount,
+  onModule,
+}: {
+  project?: Project;
+  shots: Shot[];
+  videoSegmentCount: number;
+  onModule: (module: ModuleKey) => void;
+}) {
+  const { data: assetData = [] } = trpc.overseas.listAssets.useQuery(
+    { projectId: project?.id ?? 0 },
+    { enabled: Boolean(project?.id), refetchOnWindowFocus: false }
+  );
+  const assets = assetData as Asset[];
+  const fixedAssets = assets.filter((asset) => !!assetImage(asset));
+  const promptReady = shots.filter((shot) => Boolean(shot.videoPrompt)).length;
+  const videoReady = shots.filter((shot) => Boolean(shot.videoUrl)).length;
+  const storyboardReady = shots.filter((shot) => Boolean(shot.storyboardSketchUrl)).length;
+  const cameraReady = shots.filter((shot) => Boolean(shot.cameraDiagramUrl)).length;
+  const episodeCount = new Set(shots.map((shot) => shot.episodeNumber)).size;
+
+  const stages: Array<{
+    module: ModuleKey;
+    label: string;
+    value: string;
+    state: "done" | "active" | "idle";
+    icon: ReactNode;
+  }> = [
+    {
+      module: "definition",
+      label: "项目定义",
+      value: project?.definition?.trim() ? "已定稿" : "待填写",
+      state: project?.definition?.trim() ? "done" : "active",
+      icon: <Film size={17} />,
+    },
+    {
+      module: "script",
+      label: "剧本分集",
+      value: shots.length ? `${episodeCount} 集 · ${shots.length} 分镜` : "待解析",
+      state: shots.length ? "done" : project ? "active" : "idle",
+      icon: <FileText size={17} />,
+    },
+    {
+      module: "assets",
+      label: "固定资产",
+      value: fixedAssets.length ? `${fixedAssets.length} 个参考` : "待添加",
+      state: fixedAssets.length ? "done" : shots.length ? "active" : "idle",
+      icon: <Boxes size={17} />,
+    },
+    {
+      module: "shots",
+      label: "镜头工作台",
+      value: videoSegmentCount ? `${videoSegmentCount} 个视频段` : "待分段",
+      state: videoSegmentCount ? "done" : shots.length ? "active" : "idle",
+      icon: <Clapperboard size={17} />,
+    },
+    {
+      module: "records",
+      label: "生成结果",
+      value: videoReady ? `${videoReady} 条视频` : promptReady ? `${promptReady} 条提示词` : "待生成",
+      state: videoReady ? "done" : promptReady ? "active" : "idle",
+      icon: <Archive size={17} />,
+    },
+  ];
+  const nextStage = stages.find((stage) => stage.state !== "done") ?? stages[stages.length - 1];
+  const todoItems = [
+    !project?.definition?.trim() ? "完善项目定义" : null,
+    shots.length === 0 ? "导入剧本并分集" : null,
+    fixedAssets.length === 0 && shots.length > 0 ? "添加固定参考资产" : null,
+    storyboardReady < shots.length && shots.length > 0 ? "补齐分镜草图" : null,
+    cameraReady < shots.length && shots.length > 0 ? "补齐机位示意图" : null,
+    promptReady < videoSegmentCount && videoSegmentCount > 0 ? "生成15秒提示词" : null,
+    videoReady < videoSegmentCount && promptReady > 0 ? "生成Seedance视频" : null,
+  ].filter((item): item is string => Boolean(item));
+
+  return (
+    <div style={{ height: "calc(100vh - 64px)", padding: 22, display: "grid", gridTemplateRows: "auto 1fr", gap: 16, overflow: "hidden" }}>
+      <section style={card({ padding: 20, display: "grid", gridTemplateColumns: "1fr auto", alignItems: "center", gap: 18 })}>
+        <div>
+          <div style={{ ...tinyLabel(C.gold), fontWeight: 900, marginBottom: 8 }}>AI 影片生产总览</div>
+          <h1 style={{ margin: 0, fontSize: 24 }}>{project?.name ?? "创建一个精品剧项目"}</h1>
+          <div style={{ ...tinyLabel(), marginTop: 8 }}>
+            {project ? `${project.aspectRatio === "portrait" ? "9:16" : "16:9"} · ${getVisualStylePreset(project.visualStylePreset).name}` : "固定资产参考 + 分镜视频段 + Seedance 2.0 多参生成"}
+          </div>
+        </div>
+        <Button onClick={() => onModule(nextStage.module)} style={{ background: C.ink, color: "#fff", borderRadius: 8, minWidth: 132 }}>
+          <ChevronRight size={15} />
+          {nextStage.state === "done" ? "查看结果" : `进入${nextStage.label}`}
+        </Button>
+      </section>
+
+      <section style={{ minHeight: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) 340px", gap: 16, overflow: "hidden" }}>
+        <div style={card({ padding: 18, minHeight: 0, overflow: "auto" })}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(130px, 1fr))", gap: 10 }}>
+            {stages.map((stage, index) => (
+              <button
+                key={stage.module}
+                onClick={() => onModule(stage.module)}
+                style={{
+                  ...card({
+                    minHeight: 128,
+                    padding: 14,
+                    textAlign: "left",
+                    cursor: "pointer",
+                    borderColor: stage.state === "done" ? "#cfe8dc" : stage.state === "active" ? "#d8ccff" : C.line,
+                    background: stage.state === "done" ? "#f0faf5" : stage.state === "active" ? C.purpleSoft : C.panel,
+                  }),
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ ...pill(stage.state === "active"), padding: 7 }}>{stage.icon}</span>
+                  <span style={tinyLabel(stage.state === "done" ? C.green : stage.state === "active" ? C.purple : C.dim)}>
+                    {String(index + 1).padStart(2, "0")}
+                  </span>
+                </div>
+                <div style={{ fontSize: 14, fontWeight: 900, marginTop: 14 }}>{stage.label}</div>
+                <div style={{ ...tinyLabel(), marginTop: 6 }}>{stage.value}</div>
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 16 }}>
+            <Metric label="分镜草图" value={`${storyboardReady}/${shots.length || 0}`} />
+            <Metric label="机位示意" value={`${cameraReady}/${shots.length || 0}`} />
+            <Metric label="15秒提示词" value={`${promptReady}/${videoSegmentCount || 0}`} />
+            <Metric label="Seedance视频" value={`${videoReady}/${videoSegmentCount || 0}`} />
+          </div>
+
+          <div style={card({ padding: 16, marginTop: 16, background: C.panelSoft })}>
+            <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 8 }}>待办队列</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {(todoItems.length ? todoItems : ["项目已进入出片检查"]).map((item, index) => (
+                <span key={item} style={pill(index === 0)}>{item}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <aside style={card({ padding: 16, minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr", gap: 12 })}>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 900 }}>当前焦点</div>
+            <div style={{ ...tinyLabel(), marginTop: 5 }}>{nextStage.label} · {nextStage.value}</div>
+          </div>
+          <Button onClick={() => onModule(nextStage.module)} style={{ background: C.ink, color: "#fff", borderRadius: 8 }}>
+            <ChevronRight size={14} />
+            继续制作
+          </Button>
+          <div style={{ minHeight: 0, overflow: "auto", display: "grid", gap: 9, alignContent: "start" }}>
+            {fixedAssets.slice(0, 8).map((asset) => (
+              <button key={asset.id} onClick={() => onModule("assets")} style={{ ...card({ padding: 8, display: "grid", gridTemplateColumns: "42px 1fr", gap: 10, textAlign: "left", cursor: "pointer" }) }}>
+                <div style={{ width: 42, height: 42, borderRadius: 7, background: C.panelSoft, overflow: "hidden" }}>
+                  <img src={assetImage(asset)!} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.name}</div>
+                  <div style={{ ...tinyLabel(C.purple), marginTop: 4 }}>{assetTag(asset)}</div>
+                </div>
+              </button>
+            ))}
+            {fixedAssets.length === 0 && <Empty title={project ? "资产库还没有可引用图片。" : "请先创建项目。"} icon={<Boxes size={34} />} />}
+          </div>
+        </aside>
+      </section>
+    </div>
+  );
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={card({ padding: 14 })}>
+      <div style={tinyLabel()}>{label}</div>
+      <div style={{ fontSize: 22, fontWeight: 950, marginTop: 6 }}>{value}</div>
+    </div>
   );
 }
 
