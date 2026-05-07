@@ -248,6 +248,32 @@ export const videoJobs = mysqlTable("video_jobs", {
 export type VideoJob = typeof videoJobs.$inferSelect;
 export type InsertVideoJob = typeof videoJobs.$inferInsert;
 
+// ─── 精品剧视频段表：多个分镜合成一条 Seedance 2.0 生成任务 ───────────────
+export const videoSegments = mysqlTable("video_segments", {
+  id: int("id").autoincrement().primaryKey(),
+  projectId: int("projectId").notNull(),
+  userId: int("userId").notNull(),
+  episodeNumber: int("episodeNumber").notNull(),
+  segmentNumber: int("segmentNumber").notNull(),
+  title: varchar("title", { length: 128 }),
+  /** 分镜 ID 数组 JSON */
+  shotIds: text("shotIds").notNull(),
+  duration: int("duration").default(15).notNull(),
+  prompt: text("prompt"),
+  /** 固定参考资产 ID 数组 JSON */
+  referenceAssetIds: text("referenceAssetIds"),
+  /** 生成时实际传入 Seedance 2.0 的参考图 URL 数组 JSON */
+  referenceImageUrls: text("referenceImageUrls"),
+  videoUrl: text("videoUrl"),
+  status: mysqlEnum("status", ["draft", "prompt_ready", "generating_video", "done", "failed"]).default("draft").notNull(),
+  errorMessage: text("errorMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type VideoSegment = typeof videoSegments.$inferSelect;
+export type InsertVideoSegment = typeof videoSegments.$inferInsert;
+
 // ─── 出海短剧资产表 ────────────────────────────────────────────────────────────
 export const overseasAssets = mysqlTable("overseas_assets", {
   id: int("id").autoincrement().primaryKey(),

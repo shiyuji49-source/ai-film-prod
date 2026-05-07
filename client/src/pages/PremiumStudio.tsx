@@ -134,10 +134,18 @@ type SplitEpisode = {
 type ModuleKey = "definition" | "script" | "rules" | "assets" | "shots" | "records";
 
 type VideoSegment = {
-  id: string;
+  id: string | number;
   episodeNumber: number;
   segmentNumber: number;
+  title?: string | null;
   duration: number;
+  prompt?: string | null;
+  videoUrl?: string | null;
+  status?: "draft" | "prompt_ready" | "generating_video" | "done" | "failed";
+  errorMessage?: string | null;
+  shotIds?: number[];
+  referenceAssetIds?: number[];
+  referenceImageUrls?: string[];
   shots: Shot[];
 };
 
@@ -355,7 +363,7 @@ function StudioShell() {
   const [scriptText, setScriptText] = useState("");
   const [episodes, setEpisodes] = useState<SplitEpisode[]>([]);
   const [activeEpisode, setActiveEpisode] = useState(1);
-  const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null);
+  const [activeSegmentId, setActiveSegmentId] = useState<string | number | null>(null);
 
   const projectsQuery = trpc.overseas.listProjects.useQuery(undefined, { refetchOnWindowFocus: false });
   const projectQuery = trpc.overseas.getProject.useQuery(
@@ -396,7 +404,7 @@ function StudioShell() {
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span style={pill(Boolean(project))}>{project ? "已连接项目" : "等待创建"}</span>
             <span style={pill()}>{shots.length} 个分镜</span>
-            <span style={pill()}>{buildSegments(shots).length} 个视频段</span>
+            <span style={pill()}>{Math.max(0, buildSegments(shots).length)} 个视频段</span>
           </div>
         </header>
         <section style={{ minHeight: 0, overflow: "hidden" }}>
@@ -1063,13 +1071,27 @@ function ShotWorkbench({
   project?: Project;
   shots: Shot[];
   activeEpisode: number;
-  activeSegmentId: string | null;
+  activeSegmentId: string | number | null;
   onActiveEpisode: (episode: number) => void;
-  onActiveSegment: (id: string) => void;
+  onActiveSegment: (id: string | number) => void;
   onChanged: () => void;
 }) {
   const utils = trpc.useUtils();
-  const segments = useMemo(() => buildSegments(shots), [shots]);
+  const fallbackSegments = useMemo(() => buildSegments(shots), [shots]);
+  const { data: segmentData = [] } = trpc.overseas.listVideoSegments.useQuery(
+    { projectId: project?.id ?? 0 },
+    { enabled: Boolean(project?.id && shots.length > 0), refetchOnWindowFocus: false }
+  );
+  const segments = useMemo(() => {
+    const formalSegments = (segmentData as VideoSegment[]).map((segment) => {
+      const segmentShotIds = segment.shotIds ?? segment.shots?.map((shot) => shot.id) ?? [];
+      const resolvedShots = segment.shots?.length
+        ? segment.shots
+        : segmentShotIds.map((id) => shots.find((shot) => shot.id === id)).filter((shot): shot is Shot => Boolean(shot));
+      return { ...segment, shots: resolvedShots };
+    }).filter((segment) => segment.shots.length > 0);
+    return formalSegments.length > 0 ? formalSegments : fallbackSegments;
+  }, [fallbackSegments, segmentData, shots]);
   const episodeNumbers = Array.from(new Set(shots.map((shot) => shot.episodeNumber))).sort((a, b) => a - b);
   const currentSegment = segments.find((segment) => segment.id === activeSegmentId) ?? segments.find((segment) => segment.episodeNumber === activeEpisode) ?? segments[0];
   const [activeShotId, setActiveShotId] = useState<number | null>(null);
@@ -1093,7 +1115,8 @@ function ShotWorkbench({
       onActiveEpisode(currentSegment.episodeNumber);
       setActiveShotId(currentSegment.shots[0]?.id ?? null);
       setDuration(currentSegment.duration);
-      setSegmentPrompt(currentSegment.shots[0]?.videoPrompt ?? "");
+      setSegmentPrompt(currentSegment.prompt ?? currentSegment.shots[0]?.videoPrompt ?? "");
+      setSelectedAssetIds(currentSegment.referenceAssetIds ?? []);
     }
   }, [currentSegment?.id]);
 
@@ -1125,6 +1148,16 @@ function ShotWorkbench({
       setSegmentPrompt(data.prompt);
       toast.success("15 秒视频段提示词已生成");
       if (project) await utils.overseas.getProject.invalidate({ id: project.id });
+      if (project) await utils.overseas.listVideoSegments.invalidate({ projectId: project.id });
+      onChanged();
+    },
+    onError: (err) => toast.error(err.message),
+  });
+  const generateVideoSegment = trpc.overseas.generateVideoSegment.useMutation({
+    onSuccess: async () => {
+      toast.success("Seedance 2.0 视频已生成");
+      if (project) await utils.overseas.getProject.invalidate({ id: project.id });
+      if (project) await utils.overseas.listVideoSegments.invalidate({ projectId: project.id });
       onChanged();
     },
     onError: (err) => toast.error(err.message),
@@ -1166,10 +1199,12 @@ function ShotWorkbench({
                 }),
               }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <strong style={{ fontSize: 13 }}>视频段 {String(segment.segmentNumber).padStart(2, "0")}</strong>
+                  <strong style={{ fontSize: 13 }}>{segment.title || `视频段 ${String(segment.segmentNumber).padStart(2, "0")}`}</strong>
                   <span style={tinyLabel(C.purple)}>{segment.duration}s</span>
                 </div>
-                <div style={{ ...tinyLabel(), marginTop: 5 }}>包含 {segment.shots.length} 个分镜</div>
+                <div style={{ ...tinyLabel(), marginTop: 5 }}>
+                  包含 {segment.shots.length} 个分镜{segment.status ? ` · ${segment.status === "done" ? "已出片" : segment.status === "prompt_ready" ? "提示词已就绪" : segment.status === "generating_video" ? "生成中" : segment.status === "failed" ? "失败" : "草稿"}` : ""}
+                </div>
               </button>
               {currentSegment?.id === segment.id && (
                 <div style={{ margin: "6px 0 2px 12px", display: "grid", gap: 5 }}>
@@ -1243,8 +1278,8 @@ function ShotWorkbench({
           </section>
           <section style={card({ padding: 0, minHeight: 0, display: "grid", gridTemplateRows: "1fr auto", overflow: "hidden" })}>
             <div style={{ background: C.panelSoft, display: "grid", placeItems: "center", overflow: "hidden" }}>
-              {segmentLead?.videoUrl ? (
-                <video src={segmentLead.videoUrl} controls style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+              {currentSegment?.videoUrl || segmentLead?.videoUrl ? (
+                <video src={currentSegment?.videoUrl || segmentLead?.videoUrl || ""} controls style={{ width: "100%", height: "100%", objectFit: "contain" }} />
               ) : previewImage ? (
                 <img src={previewImage} alt="预览" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
               ) : (
@@ -1262,25 +1297,37 @@ function ShotWorkbench({
               onDuration={setDuration}
               tags={referenceTags}
               isPrompting={generateSegmentPrompt.isPending}
-              isGenerating={generateVideo.isPending}
+              isGenerating={generateVideoSegment.isPending || generateVideo.isPending}
               onGeneratePrompt={() => {
                 if (!project || !currentSegment) return;
                 generateSegmentPrompt.mutate({
                   projectId: project.id,
+                  segmentId: typeof currentSegment.id === "number" ? currentSegment.id : undefined,
                   shotIds: currentSegment.shots.map((shot) => shot.id),
                   referenceAssetIds: selectedAssetIds,
                   duration,
                 });
               }}
               onGenerateVideo={() => {
-                if (!segmentLead) return;
-                generateVideo.mutate({
-                  shotId: segmentLead.id,
-                  prompt: segmentPrompt,
-                  referenceImageUrls: referenceUrls,
-                  duration,
-                  aspectRatio: project?.aspectRatio === "landscape" ? "16:9" : "9:16",
-                });
+                if (!segmentLead || !currentSegment) return;
+                const aspectRatio = project?.aspectRatio === "landscape" ? "16:9" : "9:16";
+                if (typeof currentSegment.id === "number") {
+                  generateVideoSegment.mutate({
+                    segmentId: currentSegment.id,
+                    prompt: segmentPrompt,
+                    referenceImageUrls: referenceUrls,
+                    duration,
+                    aspectRatio,
+                  });
+                } else {
+                  generateVideo.mutate({
+                    shotId: segmentLead.id,
+                    prompt: segmentPrompt,
+                    referenceImageUrls: referenceUrls,
+                    duration,
+                    aspectRatio,
+                  });
+                }
               }}
             />
           </section>

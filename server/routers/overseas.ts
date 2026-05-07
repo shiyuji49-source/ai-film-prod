@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { protectedProcedure, router } from "../_core/trpc";
 import { getDb } from "../db";
-import { overseasProjects, scriptShots, videoJobs, overseasAssets, batchJobs } from "../../drizzle/schema";
+import { overseasProjects, scriptShots, videoJobs, videoSegments, overseasAssets, batchJobs } from "../../drizzle/schema";
 import { eq, and, desc, asc, isNull, isNotNull } from "drizzle-orm";
 import { storagePut } from "../storage";
 import { nanoid } from "nanoid";
@@ -110,9 +110,32 @@ const premiumVideoPromptSchema = z.object({
 
 const premiumVideoSegmentPromptSchema = z.object({
   projectId: z.number().int(),
+  segmentId: z.number().int().optional(),
   shotIds: z.array(z.number().int()).min(1).max(6),
   referenceAssetIds: z.array(z.number().int()).max(9).optional(),
   duration: z.number().int().min(8).max(15).default(15),
+});
+
+const listVideoSegmentsSchema = z.object({
+  projectId: z.number().int(),
+  episodeNumber: z.number().int().optional(),
+});
+
+const updateVideoSegmentSchema = z.object({
+  id: z.number().int(),
+  title: z.string().max(128).optional(),
+  shotIds: z.array(z.number().int()).min(1).max(8).optional(),
+  duration: z.number().int().min(8).max(15).optional(),
+  prompt: z.string().optional(),
+  referenceAssetIds: z.array(z.number().int()).max(9).optional(),
+});
+
+const premiumVideoSegmentVideoSchema = z.object({
+  segmentId: z.number().int(),
+  prompt: z.string().optional(),
+  referenceImageUrls: z.array(z.string().url()).max(9).optional(),
+  duration: z.number().int().min(8).max(15).default(15),
+  aspectRatio: z.enum(["16:9", "9:16"]).optional(),
 });
 
 const premiumVideoSchema = z.object({
@@ -217,6 +240,130 @@ function parseStyleEnhancers(value?: string | null): string[] {
 
 function resolveProjectVisualStyle(project: typeof overseasProjects.$inferSelect, styleEnhancers = parseStyleEnhancers(project.styleEnhancers)) {
   return project.visualStylePrompt?.trim() || buildVisualStylePrompt(getVisualStylePreset(project.visualStylePreset), styleEnhancers);
+}
+
+function parseNumberArray(value?: string | null): number[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.map((item) => Number(item)).filter((item) => Number.isFinite(item));
+  } catch {
+    return [];
+  }
+  return [];
+}
+
+function parseStringArray(value?: string | null): string[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return parsed.filter((item): item is string => typeof item === "string" && item.length > 0);
+  } catch {
+    return [];
+  }
+  return [];
+}
+
+function buildVideoSegmentDrafts(
+  shots: Array<typeof scriptShots.$inferSelect>,
+  startingNumbers = new Map<number, number>(),
+) {
+  const byEpisode = new Map<number, Array<typeof scriptShots.$inferSelect>>();
+  for (const shot of shots) {
+    const list = byEpisode.get(shot.episodeNumber) ?? [];
+    list.push(shot);
+    byEpisode.set(shot.episodeNumber, list);
+  }
+
+  const drafts: Array<{
+    projectId: number;
+    userId: number;
+    episodeNumber: number;
+    segmentNumber: number;
+    title: string;
+    shotIds: string;
+    duration: number;
+  }> = [];
+
+  for (const [episodeNumber, episodeShots] of Array.from(byEpisode.entries()).sort(([a], [b]) => a - b)) {
+    const sorted = [...episodeShots].sort((a, b) => a.shotNumber - b.shotNumber);
+    let group: Array<typeof scriptShots.$inferSelect> = [];
+    let duration = 0;
+    let segmentNumber = (startingNumbers.get(episodeNumber) ?? 0) + 1;
+
+    const flush = () => {
+      if (!group.length) return;
+      const first = group[0];
+      drafts.push({
+        projectId: first.projectId,
+        userId: first.userId,
+        episodeNumber,
+        segmentNumber,
+        title: `EP${episodeNumber} 视频段 ${String(segmentNumber).padStart(2, "0")}`,
+        shotIds: JSON.stringify(group.map((shot) => shot.id)),
+        duration: Math.max(8, Math.min(15, duration || group.length * 5)),
+      });
+      group = [];
+      duration = 0;
+      segmentNumber++;
+    };
+
+    for (const shot of sorted) {
+      const shotDuration = shot.videoDuration ?? 5;
+      if (group.length >= 3 || (duration + shotDuration > 15 && group.length >= 2)) flush();
+      group.push(shot);
+      duration += shotDuration;
+    }
+    flush();
+  }
+
+  return drafts;
+}
+
+async function ensureVideoSegmentsForProject(
+  db: NonNullable<Awaited<ReturnType<typeof getDb>>>,
+  userId: number,
+  projectId: number,
+  episodeNumber?: number,
+) {
+  const shotConditions = [eq(scriptShots.projectId, projectId), eq(scriptShots.userId, userId)];
+  if (episodeNumber !== undefined) shotConditions.push(eq(scriptShots.episodeNumber, episodeNumber));
+  const shots = await db
+    .select()
+    .from(scriptShots)
+    .where(and(...shotConditions))
+    .orderBy(scriptShots.episodeNumber, scriptShots.shotNumber);
+
+  const segmentConditions = [eq(videoSegments.projectId, projectId), eq(videoSegments.userId, userId)];
+  if (episodeNumber !== undefined) segmentConditions.push(eq(videoSegments.episodeNumber, episodeNumber));
+  let segments = await db
+    .select()
+    .from(videoSegments)
+    .where(and(...segmentConditions))
+    .orderBy(videoSegments.episodeNumber, videoSegments.segmentNumber);
+
+  const coveredShotIds = new Set<number>();
+  const maxSegmentNumberByEpisode = new Map<number, number>();
+  for (const segment of segments) {
+    for (const shotId of parseNumberArray(segment.shotIds)) coveredShotIds.add(shotId);
+    maxSegmentNumberByEpisode.set(
+      segment.episodeNumber,
+      Math.max(maxSegmentNumberByEpisode.get(segment.episodeNumber) ?? 0, segment.segmentNumber),
+    );
+  }
+
+  const missingShots = shots.filter((shot) => !coveredShotIds.has(shot.id));
+  if (missingShots.length > 0) {
+    const drafts = buildVideoSegmentDrafts(missingShots, maxSegmentNumberByEpisode);
+    if (drafts.length > 0) await db.insert(videoSegments).values(drafts);
+    segments = await db
+      .select()
+      .from(videoSegments)
+      .where(and(...segmentConditions))
+      .orderBy(videoSegments.episodeNumber, videoSegments.segmentNumber);
+  }
+
+  return { segments, shots };
 }
 
 function parseEpisodeNumber(value?: string | null) {
@@ -1094,6 +1241,69 @@ Return ONLY the prompt text.`,
         .where(and(...conditions))
         .orderBy(scriptShots.episodeNumber, scriptShots.shotNumber);
       return shots;
+    }),
+
+  // ── 精品剧：正式视频段列表（多个分镜组成一条 15 秒左右视频）──────────────
+  listVideoSegments: protectedProcedure
+    .input(listVideoSegmentsSchema)
+    .query(async ({ ctx, input }) => {
+      const db = await getDb();
+      const { segments, shots } = await ensureVideoSegmentsForProject(db!, ctx.user.id, input.projectId, input.episodeNumber);
+      const shotsById = new Map(shots.map((shot) => [shot.id, shot]));
+
+      return segments.map((segment) => {
+        const shotIds = parseNumberArray(segment.shotIds);
+        return {
+          ...segment,
+          shotIds,
+          referenceAssetIds: parseNumberArray(segment.referenceAssetIds),
+          referenceImageUrls: parseStringArray(segment.referenceImageUrls),
+          shots: shotIds.map((id) => shotsById.get(id)).filter(Boolean),
+        };
+      });
+    }),
+
+  updateVideoSegment: protectedProcedure
+    .input(updateVideoSegmentSchema)
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      const [segment] = await db!
+        .select()
+        .from(videoSegments)
+        .where(and(eq(videoSegments.id, input.id), eq(videoSegments.userId, ctx.user.id)));
+      if (!segment) throw new Error("视频段不存在");
+
+      const updates: Record<string, unknown> = {};
+      if (input.title !== undefined) updates.title = input.title;
+      if (input.duration !== undefined) updates.duration = input.duration;
+      if (input.prompt !== undefined) {
+        updates.prompt = input.prompt;
+        updates.status = input.prompt.trim() ? "prompt_ready" : "draft";
+      }
+      if (input.referenceAssetIds !== undefined) updates.referenceAssetIds = JSON.stringify(input.referenceAssetIds);
+      if (input.shotIds !== undefined) {
+        const verifiedShots = await db!
+          .select()
+          .from(scriptShots)
+          .where(and(eq(scriptShots.projectId, segment.projectId), eq(scriptShots.userId, ctx.user.id)))
+          .orderBy(scriptShots.episodeNumber, scriptShots.shotNumber);
+        const validShotIds = new Set(verifiedShots.map((shot) => shot.id));
+        const nextShotIds = input.shotIds.filter((id) => validShotIds.has(id));
+        if (nextShotIds.length === 0) throw new Error("视频段至少需要包含一个有效分镜");
+        updates.shotIds = JSON.stringify(nextShotIds);
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await db!.update(videoSegments).set(updates).where(and(eq(videoSegments.id, input.id), eq(videoSegments.userId, ctx.user.id)));
+      }
+
+      const [updated] = await db!.select().from(videoSegments).where(eq(videoSegments.id, input.id));
+      return {
+        ...updated,
+        shotIds: parseNumberArray(updated.shotIds),
+        referenceAssetIds: parseNumberArray(updated.referenceAssetIds),
+        referenceImageUrls: parseStringArray(updated.referenceImageUrls),
+      };
     }),
 
   // ── 更新单个分镜 ──────────────────────────────────────────────────────────
@@ -2655,12 +2865,22 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
         .where(and(eq(overseasProjects.id, input.projectId), eq(overseasProjects.userId, ctx.user.id)));
       if (!project) throw new Error("Project not found");
 
+      const [segment] = input.segmentId
+        ? await db!
+            .select()
+            .from(videoSegments)
+            .where(and(eq(videoSegments.id, input.segmentId), eq(videoSegments.userId, ctx.user.id)))
+        : [];
+      if (input.segmentId && !segment) throw new Error("视频段不存在");
+      if (segment && segment.projectId !== input.projectId) throw new Error("视频段不属于当前项目");
+
       const allProjectShots = await db!
         .select()
         .from(scriptShots)
         .where(and(eq(scriptShots.projectId, input.projectId), eq(scriptShots.userId, ctx.user.id)))
         .orderBy(scriptShots.episodeNumber, scriptShots.shotNumber);
-      const shotIdSet = new Set(input.shotIds);
+      const requestedShotIds = input.shotIds.length > 0 ? input.shotIds : parseNumberArray(segment?.shotIds);
+      const shotIdSet = new Set(requestedShotIds);
       const shots = allProjectShots.filter((shot) => shotIdSet.has(shot.id));
       if (shots.length === 0) throw new Error("未找到可用于合成视频段的分镜");
 
@@ -2723,7 +2943,22 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
         })
         .where(and(eq(scriptShots.id, firstShot.id), eq(scriptShots.userId, ctx.user.id)));
 
-      return { shotId: firstShot.id, shotIds: shots.map((shot) => shot.id), prompt, referenceImageUrls };
+      if (segment) {
+        await db!
+          .update(videoSegments)
+          .set({
+            shotIds: JSON.stringify(shots.map((shot) => shot.id)),
+            duration: input.duration,
+            prompt,
+            referenceAssetIds: JSON.stringify(input.referenceAssetIds ?? []),
+            referenceImageUrls: JSON.stringify(referenceImageUrls),
+            status: "prompt_ready",
+            errorMessage: null,
+          })
+          .where(and(eq(videoSegments.id, segment.id), eq(videoSegments.userId, ctx.user.id)));
+      }
+
+      return { segmentId: segment?.id ?? null, shotId: firstShot.id, shotIds: shots.map((shot) => shot.id), prompt, referenceImageUrls };
     }),
 
   // ── 精品剧：生成 15 秒调度与机位示意图（image2）───────────────────────────
@@ -2813,6 +3048,126 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
       });
 
       return { assetId: (result as any).insertId as number, url };
+    }),
+
+  // ── 精品剧：按正式视频段调用 Seedance 2.0 多参考生成 ────────────────────
+  generateVideoSegment: protectedProcedure
+    .input(premiumVideoSegmentVideoSchema)
+    .mutation(async ({ ctx, input }) => {
+      const db = await getDb();
+      const [segment] = await db!
+        .select()
+        .from(videoSegments)
+        .where(and(eq(videoSegments.id, input.segmentId), eq(videoSegments.userId, ctx.user.id)));
+      if (!segment) throw new Error("视频段不存在");
+
+      const [project] = await db!
+        .select()
+        .from(overseasProjects)
+        .where(and(eq(overseasProjects.id, segment.projectId), eq(overseasProjects.userId, ctx.user.id)));
+      if (!project) throw new Error("Project not found");
+
+      const shotIds = parseNumberArray(segment.shotIds);
+      const allProjectShots = await db!
+        .select()
+        .from(scriptShots)
+        .where(and(eq(scriptShots.projectId, segment.projectId), eq(scriptShots.userId, ctx.user.id)))
+        .orderBy(scriptShots.episodeNumber, scriptShots.shotNumber);
+      const shotIdSet = new Set(shotIds);
+      const shots = allProjectShots.filter((shot) => shotIdSet.has(shot.id));
+      const firstShot = shots[0];
+      if (!firstShot) throw new Error("视频段没有可用分镜");
+
+      const prompt = input.prompt?.trim() || segment.prompt || firstShot.videoPrompt;
+      if (!prompt?.trim()) throw new Error("请先生成或填写 Seedance 2.0 视频提示词");
+
+      let referenceImageUrls = input.referenceImageUrls?.length ? input.referenceImageUrls : parseStringArray(segment.referenceImageUrls);
+      if (referenceImageUrls.length === 0) {
+        const referenceAssetIds = parseNumberArray(segment.referenceAssetIds);
+        if (referenceAssetIds.length > 0) {
+          const ids = new Set(referenceAssetIds);
+          const assets = await db!.select().from(overseasAssets).where(
+            and(eq(overseasAssets.projectId, segment.projectId), eq(overseasAssets.userId, ctx.user.id))
+          );
+          referenceImageUrls = assets
+            .filter((asset) => ids.has(asset.id))
+            .map(assetImageUrl)
+            .filter((url): url is string => Boolean(url))
+            .slice(0, 9);
+        }
+      }
+
+      const duration = input.duration || segment.duration || 15;
+      const aspectRatio = input.aspectRatio ?? (project.aspectRatio === "landscape" ? "16:9" : "9:16");
+
+      await db!
+        .update(videoSegments)
+        .set({
+          status: "generating_video",
+          prompt,
+          referenceImageUrls: JSON.stringify(referenceImageUrls),
+          duration,
+          errorMessage: null,
+        })
+        .where(and(eq(videoSegments.id, segment.id), eq(videoSegments.userId, ctx.user.id)));
+      await db!
+        .update(scriptShots)
+        .set({ status: "generating_video", errorMessage: null })
+        .where(eq(scriptShots.id, firstShot.id));
+
+      try {
+        const { url: s3VideoUrl, taskId } = await generateVideo({
+          prompt,
+          engine: "seedance-2.0",
+          referenceImageUrls: referenceImageUrls.slice(0, 9),
+          duration,
+          aspectRatio,
+          s3KeyPrefix: `premium-video-segments/${ctx.user.id}/${segment.projectId}`,
+        });
+
+        await db!.insert(videoJobs).values({
+          userId: ctx.user.id,
+          shotId: firstShot.id,
+          engine: "seedance_2_0",
+          externalJobId: taskId,
+          status: "done",
+          videoUrl: s3VideoUrl,
+        });
+        await db!
+          .update(videoSegments)
+          .set({
+            videoUrl: s3VideoUrl,
+            prompt,
+            referenceImageUrls: JSON.stringify(referenceImageUrls),
+            duration,
+            status: "done",
+          })
+          .where(and(eq(videoSegments.id, segment.id), eq(videoSegments.userId, ctx.user.id)));
+        await db!
+          .update(scriptShots)
+          .set({
+            videoUrl: s3VideoUrl,
+            videoPrompt: prompt,
+            subjectRefUrls: JSON.stringify(referenceImageUrls),
+            videoDuration: duration,
+            videoEngine: "seedance_2_0",
+            status: "done",
+          })
+          .where(eq(scriptShots.id, firstShot.id));
+
+        return { segmentId: segment.id, shotId: firstShot.id, videoUrl: s3VideoUrl, taskId };
+      } catch (err: any) {
+        const errorMessage = err?.message ?? "视频生成失败";
+        await db!
+          .update(videoSegments)
+          .set({ status: "failed", errorMessage })
+          .where(and(eq(videoSegments.id, segment.id), eq(videoSegments.userId, ctx.user.id)));
+        await db!
+          .update(scriptShots)
+          .set({ status: "failed", errorMessage })
+          .where(eq(scriptShots.id, firstShot.id));
+        throw err;
+      }
     }),
 
   // ── 精品剧：Seedance 2.0 多参考视频生成 ──────────────────────────────────
