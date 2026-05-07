@@ -127,7 +127,12 @@ async function startServer() {
   }
 
   const preferredPort = parseInt(process.env.PORT || "3000");
-  const port = await findAvailablePort(preferredPort);
+  const strictPort = process.env.STRICT_PORT === "true" || process.env.NODE_ENV === "production";
+  const portAvailable = await isPortAvailable(preferredPort);
+  if (!portAvailable && strictPort) {
+    throw new Error(`Port ${preferredPort} is busy. Stop the old server process before starting.`);
+  }
+  const port = portAvailable ? preferredPort : await findAvailablePort(preferredPort);
 
   if (port !== preferredPort) {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
