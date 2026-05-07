@@ -1848,13 +1848,33 @@ function SegmentStat({ label, value, done }: { label: string; value: string; don
 }
 
 function GenerationRecordsView({ project, shots }: { project?: Project; shots: Shot[] }) {
-  const records = shots.flatMap((shot) => [
-    shot.storyboardSketchUrl ? { type: "分镜草图", shot, status: "成功", result: shot.storyboardSketchUrl } : null,
-    shot.cameraDiagramUrl ? { type: "机位图", shot, status: "成功", result: shot.cameraDiagramUrl } : null,
-    shot.videoPrompt ? { type: "15秒提示词", shot, status: "成功", result: null } : null,
-    shot.videoUrl ? { type: "Seedance视频", shot, status: "成功", result: shot.videoUrl } : null,
-    shot.status === "failed" ? { type: "生成任务", shot, status: "失败", result: null } : null,
-  ].filter(Boolean)) as Array<{ type: string; shot: Shot; status: string; result: string | null }>;
+  const { data: segmentData = [] } = trpc.overseas.listVideoSegments.useQuery(
+    { projectId: project?.id ?? 0 },
+    { enabled: Boolean(project?.id && shots.length > 0), refetchOnWindowFocus: false }
+  );
+  const segments = (segmentData as VideoSegment[]).filter((segment) => segment.shots?.length || segment.shotIds?.length);
+  const shotRecords = shots.flatMap((shot) => [
+    shot.storyboardSketchUrl ? { id: `storyboard-${shot.id}`, type: "分镜草图", scope: `EP${shot.episodeNumber} · 分镜${shot.shotNumber}`, status: "成功", summary: shot.visualDescription || "分镜草图", prompt: shot.storyboardPrompt, result: shot.storyboardSketchUrl, error: null } : null,
+    shot.cameraDiagramUrl ? { id: `camera-${shot.id}`, type: "机位图", scope: `EP${shot.episodeNumber} · 分镜${shot.shotNumber}`, status: "成功", summary: shot.visualDescription || "机位示意图", prompt: shot.cameraDiagramPrompt, result: shot.cameraDiagramUrl, error: null } : null,
+    shot.status === "failed" ? { id: `failed-shot-${shot.id}`, type: "分镜任务", scope: `EP${shot.episodeNumber} · 分镜${shot.shotNumber}`, status: "失败", summary: shot.visualDescription || "生成失败", prompt: shot.videoPrompt || shot.storyboardPrompt || shot.cameraDiagramPrompt, result: null, error: shot.errorMessage } : null,
+  ].filter(Boolean)) as Array<RecordItem>;
+  const segmentRecords = segments.flatMap((segment) => {
+    const shotCount = segment.shots?.length ?? segment.shotIds?.length ?? 0;
+    const scope = `EP${segment.episodeNumber} · 视频段${String(segment.segmentNumber).padStart(2, "0")}`;
+    return [
+      segment.prompt ? { id: `segment-prompt-${segment.id}`, type: "15秒提示词", scope, status: "成功", summary: `包含 ${shotCount} 个分镜 · ${segment.duration}s`, prompt: segment.prompt, result: null, error: null } : null,
+      segment.videoUrl ? { id: `segment-video-${segment.id}`, type: "Seedance视频", scope, status: "成功", summary: `包含 ${shotCount} 个分镜 · ${segment.duration}s`, prompt: segment.prompt, result: segment.videoUrl, error: null } : null,
+      segment.status === "failed" ? { id: `failed-segment-${segment.id}`, type: "视频段任务", scope, status: "失败", summary: `包含 ${shotCount} 个分镜 · ${segment.duration}s`, prompt: segment.prompt, result: segment.videoUrl ?? null, error: segment.errorMessage } : null,
+    ].filter(Boolean);
+  }) as Array<RecordItem>;
+  const records = [...segmentRecords, ...shotRecords];
+  const counts = {
+    total: records.length,
+    prompts: records.filter((record) => record.type === "15秒提示词").length,
+    videos: records.filter((record) => record.type === "Seedance视频").length,
+    failed: records.filter((record) => record.status === "失败").length,
+    visuals: records.filter((record) => record.type === "分镜草图" || record.type === "机位图").length,
+  };
 
   return (
     <div style={{ height: "calc(100vh - 64px)", padding: 22, display: "grid", gridTemplateColumns: "1fr 340px", gap: 16, overflow: "hidden" }}>
@@ -1864,34 +1884,64 @@ function GenerationRecordsView({ project, shots }: { project?: Project; shots: S
           <div style={tinyLabel()}>轻量任务记录：查看、重试、复制提示词、加入资产库。</div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {["全部", "分集", "分镜草图", "机位图", "15秒提示词", "Seedance视频", "失败"].map((item) => <span key={item} style={pill(item === "全部")}>{item}</span>)}
+          {[
+            `全部 ${counts.total}`,
+            `提示词 ${counts.prompts}`,
+            `视频 ${counts.videos}`,
+            `视觉图 ${counts.visuals}`,
+            `失败 ${counts.failed}`,
+          ].map((item, index) => <span key={item} style={pill(index === 0)}>{item}</span>)}
         </div>
         <div style={{ minHeight: 0, overflow: "auto", display: "grid", gap: 10, alignContent: "start" }}>
-          {records.map((record, index) => (
-            <div key={`${record.type}-${record.shot.id}-${index}`} style={card({ padding: 12, display: "grid", gridTemplateColumns: "140px 1fr 72px 86px", alignItems: "center", gap: 12 })}>
+          {records.map((record) => (
+            <div key={record.id} style={card({ padding: 12, display: "grid", gridTemplateColumns: "140px 1fr 86px 176px", alignItems: "center", gap: 12, borderColor: record.status === "失败" ? "#f1c7c0" : C.line, background: record.status === "失败" ? "#fff7f5" : C.panel })}>
               <div>
                 <strong style={{ fontSize: 13 }}>{record.type}</strong>
-                <div style={{ ...tinyLabel(C.dim), marginTop: 4 }}>EP{record.shot.episodeNumber} · 分镜{record.shot.shotNumber}</div>
+                <div style={{ ...tinyLabel(C.dim), marginTop: 4 }}>{record.scope}</div>
               </div>
-              <div style={{ ...tinyLabel(), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{record.shot.visualDescription || record.shot.videoPrompt || "暂无摘要"}</div>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ ...tinyLabel(C.text), overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{record.summary}</div>
+                {record.error && <div style={{ ...tinyLabel(C.red), marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{record.error}</div>}
+              </div>
               <span style={pill(record.status === "成功")}>{record.status}</span>
-              <Button variant="outline" size="sm" onClick={() => copy(record.shot.videoPrompt || record.shot.storyboardPrompt || record.shot.cameraDiagramPrompt)} style={{ borderColor: C.line, borderRadius: 8 }}>
-                <Copy size={13} /> 复制
-              </Button>
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                <Button variant="outline" size="sm" disabled={!record.prompt} onClick={() => copy(record.prompt)} style={{ borderColor: C.line, borderRadius: 8 }}>
+                  <Copy size={13} /> 提示词
+                </Button>
+                <Button variant="outline" size="sm" disabled={!record.result} onClick={() => record.result && window.open(record.result, "_blank")} style={{ borderColor: C.line, borderRadius: 8 }}>
+                  <Play size={13} /> 查看
+                </Button>
+              </div>
             </div>
           ))}
           {records.length === 0 && <Empty title={project ? "还没有生成记录。" : "请先选择项目。"} icon={<Clock size={36} />} />}
         </div>
       </section>
       <aside style={card({ padding: 16, alignSelf: "start" })}>
-        <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 10 }}>当前策略</div>
-        <div style={{ ...tinyLabel(), lineHeight: 1.7 }}>
-          第一版不做复杂版本管理。分镜草图、机位图和视频结果都可以回流资产库；失败任务提供重试入口，完整任务表会在下一阶段接入。
+        <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 10 }}>结果管理</div>
+        <div style={{ display: "grid", gap: 8 }}>
+          <Metric label="视频段" value={String(segments.length)} />
+          <Metric label="成功视频" value={String(counts.videos)} />
+          <Metric label="失败任务" value={String(counts.failed)} />
+        </div>
+        <div style={{ ...tinyLabel(), lineHeight: 1.7, marginTop: 12 }}>
+          失败任务会保留原因；回到“镜头工作台”后，当前视频段顶部会出现重试按钮。
         </div>
       </aside>
     </div>
   );
 }
+
+type RecordItem = {
+  id: string;
+  type: string;
+  scope: string;
+  status: "成功" | "失败";
+  summary: string;
+  prompt: string | null | undefined;
+  result: string | null;
+  error: string | null | undefined;
+};
 
 function InfoLine({ label, value }: { label: string; value: string }) {
   return (
