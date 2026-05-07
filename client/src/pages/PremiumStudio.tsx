@@ -1373,6 +1373,58 @@ function ShotWorkbench({
   const referenceTags = selectedAssets.map(assetTag);
   if (activeShot?.storyboardSketchUrl) referenceTags.push(`@分镜EP${activeShot.episodeNumber}-${activeShot.shotNumber}`);
   if (activeShot?.cameraDiagramUrl) referenceTags.push(`@机位EP${activeShot.episodeNumber}-${activeShot.shotNumber}`);
+  const segmentStats = currentSegment ? getSegmentStats(currentSegment, selectedAssets.length, segmentPrompt) : null;
+  const focusShot =
+    currentSegment?.shots.find((shot) => !shot.storyboardSketchUrl) ||
+    currentSegment?.shots.find((shot) => !shot.cameraDiagramUrl) ||
+    activeShot;
+  const runNextSegmentAction = () => {
+    if (!currentSegment || !activeShot || !project) return;
+    if (segmentStats?.nextAction === "storyboard" && focusShot) {
+      setActiveShotId(focusShot.id);
+      generateStoryboard.mutate({ shotId: focusShot.id, imageEngine: "image2", addToAssetLibrary: false });
+      return;
+    }
+    if (segmentStats?.nextAction === "camera" && focusShot) {
+      setActiveShotId(focusShot.id);
+      generateDiagram.mutate({ shotId: focusShot.id, imageEngine: "image2", addToAssetLibrary: false });
+      return;
+    }
+    if (segmentStats?.nextAction === "asset") {
+      setAssetPickerOpen(true);
+      return;
+    }
+    if (segmentStats?.nextAction === "prompt") {
+      generateSegmentPrompt.mutate({
+        projectId: project.id,
+        segmentId: typeof currentSegment.id === "number" ? currentSegment.id : undefined,
+        shotIds: currentSegment.shots.map((shot) => shot.id),
+        referenceAssetIds: selectedAssetIds,
+        duration,
+      });
+      return;
+    }
+    if (segmentStats?.nextAction === "video" && segmentLead) {
+      const aspectRatio = project.aspectRatio === "landscape" ? "16:9" : "9:16";
+      if (typeof currentSegment.id === "number") {
+        generateVideoSegment.mutate({
+          segmentId: currentSegment.id,
+          prompt: segmentPrompt,
+          referenceImageUrls: referenceUrls,
+          duration,
+          aspectRatio,
+        });
+      } else {
+        generateVideo.mutate({
+          shotId: segmentLead.id,
+          prompt: segmentPrompt,
+          referenceImageUrls: referenceUrls,
+          duration,
+          aspectRatio,
+        });
+      }
+    }
+  };
 
   return (
     <div style={{ height: "calc(100vh - 64px)", padding: 18, display: "grid", gridTemplateColumns: "250px minmax(520px, 1fr) 330px", gap: 14, overflow: "hidden" }}>
@@ -1435,6 +1487,10 @@ function ShotWorkbench({
               <div style={{ ...tinyLabel(), marginTop: 5 }}>几个分镜镜头合成一条 15 秒左右 Seedance 2.0 提示词。</div>
             </div>
             <div style={{ display: "flex", gap: 8 }}>
+              <Button disabled={!segmentStats || segmentStats.nextAction === "done" || generateStoryboard.isPending || generateDiagram.isPending || generateSegmentPrompt.isPending || generateVideoSegment.isPending || generateVideo.isPending} onClick={runNextSegmentAction} style={{ background: C.ink, color: "#fff", borderRadius: 8 }}>
+                {generateStoryboard.isPending || generateDiagram.isPending || generateSegmentPrompt.isPending || generateVideoSegment.isPending || generateVideo.isPending ? <Loader2 className="animate-spin" size={14} /> : <ChevronRight size={14} />}
+                {segmentStats?.nextLabel ?? "下一步"}
+              </Button>
               <Button variant="outline" disabled={!activeShot || generateStoryboard.isPending} onClick={() => activeShot && generateStoryboard.mutate({ shotId: activeShot.id, imageEngine: "image2", addToAssetLibrary: false })} style={{ borderColor: C.line, borderRadius: 8 }}>
                 {generateStoryboard.isPending ? <Loader2 className="animate-spin" size={14} /> : <ImageIcon size={14} />}
                 分镜草图
@@ -1445,6 +1501,15 @@ function ShotWorkbench({
               </Button>
             </div>
           </div>
+          {segmentStats && (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(92px, 1fr))", gap: 8, marginTop: 12 }}>
+              <SegmentStat label="分镜" value={`${segmentStats.shots} 个`} done />
+              <SegmentStat label="参考图" value={`${segmentStats.references}/9`} done={segmentStats.references > 0} />
+              <SegmentStat label="草图" value={`${segmentStats.storyboards}/${segmentStats.shots}`} done={segmentStats.storyboards === segmentStats.shots} />
+              <SegmentStat label="机位" value={`${segmentStats.cameras}/${segmentStats.shots}`} done={segmentStats.cameras === segmentStats.shots} />
+              <SegmentStat label="状态" value={segmentStats.statusLabel} done={segmentStats.nextAction === "done"} />
+            </div>
+          )}
         </div>
         <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(1, currentSegment?.shots.length ?? 1)}, minmax(120px, 1fr))`, gap: 10, minHeight: 0 }}>
           {(currentSegment?.shots ?? []).map((shot) => (
@@ -1462,7 +1527,7 @@ function ShotWorkbench({
           <section style={card({ padding: 14, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr", gap: 10 })}>
             <div>
               <div style={{ fontSize: 15, fontWeight: 900 }}>当前分镜</div>
-              <div style={tinyLabel()}>动作、台词、情绪和表演留白</div>
+              <div style={tinyLabel()}>{focusShot && focusShot.id !== activeShot?.id ? `下一步建议处理分镜 ${focusShot.shotNumber}` : "动作、台词、情绪和表演留白"}</div>
             </div>
             {activeShot ? (
               <div style={{ minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 10 }}>
@@ -1734,6 +1799,42 @@ function SeedanceComposer({
           生成
         </Button>
       </div>
+    </div>
+  );
+}
+
+function getSegmentStats(segment: VideoSegment, referenceCount: number, prompt: string) {
+  const shots = segment.shots.length;
+  const storyboards = segment.shots.filter((shot) => Boolean(shot.storyboardSketchUrl)).length;
+  const cameras = segment.shots.filter((shot) => Boolean(shot.cameraDiagramUrl)).length;
+  const hasPrompt = Boolean((segment.prompt || prompt).trim());
+  const hasVideo = Boolean(segment.videoUrl || segment.shots[0]?.videoUrl);
+  const missingStoryboardShot = segment.shots.find((shot) => !shot.storyboardSketchUrl);
+  const missingCameraShot = segment.shots.find((shot) => !shot.cameraDiagramUrl);
+
+  if (hasVideo) {
+    return { shots, storyboards, cameras, references: referenceCount, statusLabel: "已出片", nextAction: "done" as const, nextLabel: "查看结果" };
+  }
+  if (missingStoryboardShot) {
+    return { shots, storyboards, cameras, references: referenceCount, statusLabel: "补草图", nextAction: "storyboard" as const, nextLabel: `生成分镜${missingStoryboardShot.shotNumber}草图` };
+  }
+  if (missingCameraShot) {
+    return { shots, storyboards, cameras, references: referenceCount, statusLabel: "补机位", nextAction: "camera" as const, nextLabel: `生成分镜${missingCameraShot.shotNumber}机位` };
+  }
+  if (referenceCount === 0) {
+    return { shots, storyboards, cameras, references: referenceCount, statusLabel: "缺参考", nextAction: "asset" as const, nextLabel: "添加参考资产" };
+  }
+  if (!hasPrompt) {
+    return { shots, storyboards, cameras, references: referenceCount, statusLabel: "待提示词", nextAction: "prompt" as const, nextLabel: "生成15秒提示词" };
+  }
+  return { shots, storyboards, cameras, references: referenceCount, statusLabel: "可出片", nextAction: "video" as const, nextLabel: "生成Seedance视频" };
+}
+
+function SegmentStat({ label, value, done }: { label: string; value: string; done: boolean }) {
+  return (
+    <div style={{ ...card({ padding: "9px 10px", background: done ? "#f4fbf7" : C.panelSoft, borderColor: done ? "#cfe8dc" : C.line }) }}>
+      <div style={tinyLabel(done ? C.green : C.dim)}>{label}</div>
+      <div style={{ fontSize: 13, fontWeight: 900, marginTop: 3 }}>{value}</div>
     </div>
   );
 }
