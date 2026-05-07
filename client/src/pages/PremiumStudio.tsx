@@ -1378,6 +1378,7 @@ function ShotWorkbench({
     currentSegment?.shots.find((shot) => !shot.storyboardSketchUrl) ||
     currentSegment?.shots.find((shot) => !shot.cameraDiagramUrl) ||
     activeShot;
+  const currentError = currentSegment?.errorMessage || activeShot?.errorMessage || null;
   const runNextSegmentAction = () => {
     if (!currentSegment || !activeShot || !project) return;
     if (segmentStats?.nextAction === "storyboard" && focusShot) {
@@ -1508,6 +1509,12 @@ function ShotWorkbench({
               <SegmentStat label="草图" value={`${segmentStats.storyboards}/${segmentStats.shots}`} done={segmentStats.storyboards === segmentStats.shots} />
               <SegmentStat label="机位" value={`${segmentStats.cameras}/${segmentStats.shots}`} done={segmentStats.cameras === segmentStats.shots} />
               <SegmentStat label="状态" value={segmentStats.statusLabel} done={segmentStats.nextAction === "done"} />
+            </div>
+          )}
+          {currentError && (
+            <div style={{ ...card({ padding: 10, marginTop: 10, background: "#fff7f5", borderColor: "#f1c7c0" }) }}>
+              <div style={{ fontSize: 12, fontWeight: 900, color: C.red, marginBottom: 4 }}>生成失败，可直接点击下一步重试</div>
+              <div style={{ ...tinyLabel(C.red), lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{currentError}</div>
             </div>
           )}
         </div>
@@ -1811,23 +1818,24 @@ function getSegmentStats(segment: VideoSegment, referenceCount: number, prompt: 
   const hasVideo = Boolean(segment.videoUrl || segment.shots[0]?.videoUrl);
   const missingStoryboardShot = segment.shots.find((shot) => !shot.storyboardSketchUrl);
   const missingCameraShot = segment.shots.find((shot) => !shot.cameraDiagramUrl);
+  const hasError = segment.status === "failed" || segment.shots.some((shot) => shot.status === "failed");
 
   if (hasVideo) {
     return { shots, storyboards, cameras, references: referenceCount, statusLabel: "已出片", nextAction: "done" as const, nextLabel: "查看结果" };
   }
   if (missingStoryboardShot) {
-    return { shots, storyboards, cameras, references: referenceCount, statusLabel: "补草图", nextAction: "storyboard" as const, nextLabel: `生成分镜${missingStoryboardShot.shotNumber}草图` };
+    return { shots, storyboards, cameras, references: referenceCount, statusLabel: hasError ? "草图失败" : "补草图", nextAction: "storyboard" as const, nextLabel: hasError ? `重试分镜${missingStoryboardShot.shotNumber}草图` : `生成分镜${missingStoryboardShot.shotNumber}草图` };
   }
   if (missingCameraShot) {
-    return { shots, storyboards, cameras, references: referenceCount, statusLabel: "补机位", nextAction: "camera" as const, nextLabel: `生成分镜${missingCameraShot.shotNumber}机位` };
+    return { shots, storyboards, cameras, references: referenceCount, statusLabel: hasError ? "机位失败" : "补机位", nextAction: "camera" as const, nextLabel: hasError ? `重试分镜${missingCameraShot.shotNumber}机位` : `生成分镜${missingCameraShot.shotNumber}机位` };
   }
   if (referenceCount === 0) {
     return { shots, storyboards, cameras, references: referenceCount, statusLabel: "缺参考", nextAction: "asset" as const, nextLabel: "添加参考资产" };
   }
   if (!hasPrompt) {
-    return { shots, storyboards, cameras, references: referenceCount, statusLabel: "待提示词", nextAction: "prompt" as const, nextLabel: "生成15秒提示词" };
+    return { shots, storyboards, cameras, references: referenceCount, statusLabel: hasError ? "提示词失败" : "待提示词", nextAction: "prompt" as const, nextLabel: hasError ? "重试提示词" : "生成15秒提示词" };
   }
-  return { shots, storyboards, cameras, references: referenceCount, statusLabel: "可出片", nextAction: "video" as const, nextLabel: "生成Seedance视频" };
+  return { shots, storyboards, cameras, references: referenceCount, statusLabel: hasError ? "视频失败" : "可出片", nextAction: "video" as const, nextLabel: hasError ? "重试Seedance视频" : "生成Seedance视频" };
 }
 
 function SegmentStat({ label, value, done }: { label: string; value: string; done: boolean }) {

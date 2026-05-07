@@ -264,6 +264,17 @@ function parseStringArray(value?: string | null): string[] {
   return [];
 }
 
+function generationErrorMessage(err: unknown, fallback: string) {
+  const raw = err instanceof Error ? err.message : String(err || "");
+  if (!raw) return fallback;
+  if (raw.includes("insufficient_quota") || raw.includes("quota") || raw.includes("余额")) return "API 额度不足，请检查 VectorEngine/模型渠道余额。";
+  if (raw.includes("401") || raw.includes("403") || raw.includes("Unauthorized") || raw.includes("Forbidden")) return "API 鉴权失败，请检查服务器 .env 里的 API Key。";
+  if (raw.includes("No available channels") || raw.includes("503") || raw.includes("无可用渠道")) return "模型渠道暂时不可用，请稍后重试或切换模型渠道。";
+  if (raw.includes("timeout") || raw.includes("ETIMEDOUT") || raw.includes("fetch failed")) return "网络或模型接口超时，请稍后重试。";
+  if (raw.includes("TOS") || raw.includes("S3") || raw.includes("storage") || raw.includes("download image")) return "生成成功但文件保存失败，请检查 TOS 对象存储配置。";
+  return raw.length > 220 ? `${raw.slice(0, 220)}...` : raw;
+}
+
 function buildVideoSegmentDrafts(
   shots: Array<typeof scriptShots.$inferSelect>,
   startingNumbers = new Map<number, number>(),
@@ -2751,47 +2762,61 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
         .where(and(eq(overseasProjects.id, shot.projectId), eq(overseasProjects.userId, ctx.user.id)));
       if (!project) throw new Error("Project not found");
 
-      const prompt = input.prompt?.trim() || await generateStoryboardSketchPrompt(
-        shotToInfo(shot, shot.videoDuration ?? 15),
-        resolveProjectVisualStyle(project),
-        {
-          projectDefinition: project.definition,
-          projectBible: project.projectBible,
-          visualStylePreset: project.visualStylePreset,
-          styleEnhancers: parseStyleEnhancers(project.styleEnhancers),
-          visualStylePrompt: resolveProjectVisualStyle(project),
-          aspectRatio: project.aspectRatio === "portrait" ? "9:16" : "16:9",
-        }
-      );
-      const aspectRatio = project.aspectRatio === "landscape" ? "16:9" : "9:16";
-      const { url } = await generateImage({
-        prompt,
-        engine: toImageEngine(input.imageEngine),
-        aspectRatio,
-        s3KeyPrefix: `premium-storyboards/${ctx.user.id}/${shot.projectId}`,
-      });
-
       await db!
         .update(scriptShots)
-        .set({ storyboardPrompt: prompt, storyboardSketchUrl: url })
+        .set({ status: "generating_frame", errorMessage: null })
         .where(eq(scriptShots.id, shot.id));
 
-      let assetId: number | null = null;
-      if (input.addToAssetLibrary) {
-        const [result] = await db!.insert(overseasAssets).values({
-          projectId: shot.projectId,
-          userId: ctx.user.id,
-          type: "storyboard",
-          name: `EP${shot.episodeNumber}-${shot.shotNumber} 分镜草图`,
-          description: shot.visualDescription,
-          referenceImageUrl: url,
-          mainImageUrl: url,
-          tags: `episode:${shot.episodeNumber},shot:${shot.shotNumber}`,
+      try {
+        const prompt = input.prompt?.trim() || await generateStoryboardSketchPrompt(
+          shotToInfo(shot, shot.videoDuration ?? 15),
+          resolveProjectVisualStyle(project),
+          {
+            projectDefinition: project.definition,
+            projectBible: project.projectBible,
+            visualStylePreset: project.visualStylePreset,
+            styleEnhancers: parseStyleEnhancers(project.styleEnhancers),
+            visualStylePrompt: resolveProjectVisualStyle(project),
+            aspectRatio: project.aspectRatio === "portrait" ? "9:16" : "16:9",
+          }
+        );
+        const aspectRatio = project.aspectRatio === "landscape" ? "16:9" : "9:16";
+        const { url } = await generateImage({
+          prompt,
+          engine: toImageEngine(input.imageEngine),
+          aspectRatio,
+          s3KeyPrefix: `premium-storyboards/${ctx.user.id}/${shot.projectId}`,
         });
-        assetId = (result as any).insertId as number;
-      }
 
-      return { shotId: shot.id, prompt, url, assetId };
+        await db!
+          .update(scriptShots)
+          .set({ storyboardPrompt: prompt, storyboardSketchUrl: url, status: "frame_done", errorMessage: null })
+          .where(eq(scriptShots.id, shot.id));
+
+        let assetId: number | null = null;
+        if (input.addToAssetLibrary) {
+          const [result] = await db!.insert(overseasAssets).values({
+            projectId: shot.projectId,
+            userId: ctx.user.id,
+            type: "storyboard",
+            name: `EP${shot.episodeNumber}-${shot.shotNumber} 分镜草图`,
+            description: shot.visualDescription,
+            referenceImageUrl: url,
+            mainImageUrl: url,
+            tags: `episode:${shot.episodeNumber},shot:${shot.shotNumber}`,
+          });
+          assetId = (result as any).insertId as number;
+        }
+
+        return { shotId: shot.id, prompt, url, assetId };
+      } catch (err) {
+        const errorMessage = generationErrorMessage(err, "分镜草图生成失败");
+        await db!
+          .update(scriptShots)
+          .set({ status: "failed", errorMessage })
+          .where(eq(scriptShots.id, shot.id));
+        throw new Error(errorMessage);
+      }
     }),
 
   // ── 精品剧：生成视频提示词（Seedance 2.0 多参考）──────────────────────────
@@ -2883,6 +2908,7 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
       const shotIdSet = new Set(requestedShotIds);
       const shots = allProjectShots.filter((shot) => shotIdSet.has(shot.id));
       if (shots.length === 0) throw new Error("未找到可用于合成视频段的分镜");
+      const firstShot = shots[0];
 
       let assets = await db!.select().from(overseasAssets).where(
         and(eq(overseasAssets.projectId, input.projectId), eq(overseasAssets.userId, ctx.user.id))
@@ -2901,7 +2927,6 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
         .filter((item): item is Seedance2ReferenceImage => !!item)
         .slice(0, 9);
 
-      const firstShot = shots[0];
       const combinedShot: ShotInfo = {
         shotNumber: firstShot.shotNumber,
         sceneName: Array.from(new Set(shots.map((shot) => shot.sceneName).filter(Boolean))).join(" / ") || firstShot.sceneName || "",
@@ -2919,46 +2944,69 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
         duration: input.duration,
       };
 
-      const prompt = await generateSeedance2Prompt(
-        combinedShot,
-        referenceImages,
-        {
-          projectDefinition: project.definition,
-          projectBible: project.projectBible,
-          visualStylePreset: project.visualStylePreset,
-          styleEnhancers: parseStyleEnhancers(project.styleEnhancers),
-          visualStylePrompt: resolveProjectVisualStyle(project),
-          aspectRatio: project.aspectRatio === "portrait" ? "9:16" : "16:9",
-        }
-      );
-      const referenceImageUrls = referenceImages.map((item) => item.url);
-
-      await db!
-        .update(scriptShots)
-        .set({
-          videoPrompt: prompt,
-          subjectRefUrls: JSON.stringify(referenceImageUrls),
-          videoDuration: input.duration,
-          videoEngine: "seedance_2_0",
-        })
-        .where(and(eq(scriptShots.id, firstShot.id), eq(scriptShots.userId, ctx.user.id)));
-
       if (segment) {
         await db!
           .update(videoSegments)
-          .set({
-            shotIds: JSON.stringify(shots.map((shot) => shot.id)),
-            duration: input.duration,
-            prompt,
-            referenceAssetIds: JSON.stringify(input.referenceAssetIds ?? []),
-            referenceImageUrls: JSON.stringify(referenceImageUrls),
-            status: "prompt_ready",
-            errorMessage: null,
-          })
+          .set({ status: "draft", errorMessage: null })
           .where(and(eq(videoSegments.id, segment.id), eq(videoSegments.userId, ctx.user.id)));
       }
 
-      return { segmentId: segment?.id ?? null, shotId: firstShot.id, shotIds: shots.map((shot) => shot.id), prompt, referenceImageUrls };
+      try {
+        const prompt = await generateSeedance2Prompt(
+          combinedShot,
+          referenceImages,
+          {
+            projectDefinition: project.definition,
+            projectBible: project.projectBible,
+            visualStylePreset: project.visualStylePreset,
+            styleEnhancers: parseStyleEnhancers(project.styleEnhancers),
+            visualStylePrompt: resolveProjectVisualStyle(project),
+            aspectRatio: project.aspectRatio === "portrait" ? "9:16" : "16:9",
+          }
+        );
+        const referenceImageUrls = referenceImages.map((item) => item.url);
+
+        await db!
+          .update(scriptShots)
+          .set({
+            videoPrompt: prompt,
+            subjectRefUrls: JSON.stringify(referenceImageUrls),
+            videoDuration: input.duration,
+            videoEngine: "seedance_2_0",
+            errorMessage: null,
+          })
+          .where(and(eq(scriptShots.id, firstShot.id), eq(scriptShots.userId, ctx.user.id)));
+
+        if (segment) {
+          await db!
+            .update(videoSegments)
+            .set({
+              shotIds: JSON.stringify(shots.map((shot) => shot.id)),
+              duration: input.duration,
+              prompt,
+              referenceAssetIds: JSON.stringify(input.referenceAssetIds ?? []),
+              referenceImageUrls: JSON.stringify(referenceImageUrls),
+              status: "prompt_ready",
+              errorMessage: null,
+            })
+            .where(and(eq(videoSegments.id, segment.id), eq(videoSegments.userId, ctx.user.id)));
+        }
+
+        return { segmentId: segment?.id ?? null, shotId: firstShot.id, shotIds: shots.map((shot) => shot.id), prompt, referenceImageUrls };
+      } catch (err) {
+        const errorMessage = generationErrorMessage(err, "15 秒视频提示词生成失败");
+        await db!
+          .update(scriptShots)
+          .set({ status: "failed", errorMessage })
+          .where(and(eq(scriptShots.id, firstShot.id), eq(scriptShots.userId, ctx.user.id)));
+        if (segment) {
+          await db!
+            .update(videoSegments)
+            .set({ status: "failed", errorMessage })
+            .where(and(eq(videoSegments.id, segment.id), eq(videoSegments.userId, ctx.user.id)));
+        }
+        throw new Error(errorMessage);
+      }
     }),
 
   // ── 精品剧：生成 15 秒调度与机位示意图（image2）───────────────────────────
@@ -2977,47 +3025,61 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
         .where(and(eq(overseasProjects.id, shot.projectId), eq(overseasProjects.userId, ctx.user.id)));
       if (!project) throw new Error("Project not found");
 
-      const prompt = input.prompt?.trim() || await generateCameraDiagramPrompt(
-        shotToInfo(shot, shot.videoDuration ?? 15),
-        shot.videoPrompt ?? undefined,
-        {
-          projectDefinition: project.definition,
-          projectBible: project.projectBible,
-          visualStylePreset: project.visualStylePreset,
-          styleEnhancers: parseStyleEnhancers(project.styleEnhancers),
-          visualStylePrompt: resolveProjectVisualStyle(project),
-          aspectRatio: project.aspectRatio === "portrait" ? "9:16" : "16:9",
-        }
-      );
-      const aspectRatio = project.aspectRatio === "landscape" ? "16:9" : "9:16";
-      const { url } = await generateImage({
-        prompt,
-        engine: toImageEngine(input.imageEngine),
-        aspectRatio,
-        s3KeyPrefix: `premium-camera-diagrams/${ctx.user.id}/${shot.projectId}`,
-      });
-
       await db!
         .update(scriptShots)
-        .set({ cameraDiagramPrompt: prompt, cameraDiagramUrl: url })
+        .set({ status: "generating_frame", errorMessage: null })
         .where(eq(scriptShots.id, shot.id));
 
-      let assetId: number | null = null;
-      if (input.addToAssetLibrary) {
-        const [result] = await db!.insert(overseasAssets).values({
-          projectId: shot.projectId,
-          userId: ctx.user.id,
-          type: "camera_diagram",
-          name: `EP${shot.episodeNumber}-${shot.shotNumber} 机位示意图`,
-          description: shot.videoPrompt || shot.visualDescription,
-          referenceImageUrl: url,
-          mainImageUrl: url,
-          tags: `episode:${shot.episodeNumber},shot:${shot.shotNumber}`,
+      try {
+        const prompt = input.prompt?.trim() || await generateCameraDiagramPrompt(
+          shotToInfo(shot, shot.videoDuration ?? 15),
+          shot.videoPrompt ?? undefined,
+          {
+            projectDefinition: project.definition,
+            projectBible: project.projectBible,
+            visualStylePreset: project.visualStylePreset,
+            styleEnhancers: parseStyleEnhancers(project.styleEnhancers),
+            visualStylePrompt: resolveProjectVisualStyle(project),
+            aspectRatio: project.aspectRatio === "portrait" ? "9:16" : "16:9",
+          }
+        );
+        const aspectRatio = project.aspectRatio === "landscape" ? "16:9" : "9:16";
+        const { url } = await generateImage({
+          prompt,
+          engine: toImageEngine(input.imageEngine),
+          aspectRatio,
+          s3KeyPrefix: `premium-camera-diagrams/${ctx.user.id}/${shot.projectId}`,
         });
-        assetId = (result as any).insertId as number;
-      }
 
-      return { shotId: shot.id, prompt, url, assetId };
+        await db!
+          .update(scriptShots)
+          .set({ cameraDiagramPrompt: prompt, cameraDiagramUrl: url, status: "frame_done", errorMessage: null })
+          .where(eq(scriptShots.id, shot.id));
+
+        let assetId: number | null = null;
+        if (input.addToAssetLibrary) {
+          const [result] = await db!.insert(overseasAssets).values({
+            projectId: shot.projectId,
+            userId: ctx.user.id,
+            type: "camera_diagram",
+            name: `EP${shot.episodeNumber}-${shot.shotNumber} 机位示意图`,
+            description: shot.videoPrompt || shot.visualDescription,
+            referenceImageUrl: url,
+            mainImageUrl: url,
+            tags: `episode:${shot.episodeNumber},shot:${shot.shotNumber}`,
+          });
+          assetId = (result as any).insertId as number;
+        }
+
+        return { shotId: shot.id, prompt, url, assetId };
+      } catch (err) {
+        const errorMessage = generationErrorMessage(err, "机位示意图生成失败");
+        await db!
+          .update(scriptShots)
+          .set({ status: "failed", errorMessage })
+          .where(eq(scriptShots.id, shot.id));
+        throw new Error(errorMessage);
+      }
     }),
 
   // ── 精品剧：把分镜草图/机位图加入资产库 ─────────────────────────────────
@@ -3157,7 +3219,7 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
 
         return { segmentId: segment.id, shotId: firstShot.id, videoUrl: s3VideoUrl, taskId };
       } catch (err: any) {
-        const errorMessage = err?.message ?? "视频生成失败";
+        const errorMessage = generationErrorMessage(err, "视频生成失败");
         await db!
           .update(videoSegments)
           .set({ status: "failed", errorMessage })
@@ -3166,7 +3228,7 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
           .update(scriptShots)
           .set({ status: "failed", errorMessage })
           .where(eq(scriptShots.id, firstShot.id));
-        throw err;
+        throw new Error(errorMessage);
       }
     }),
 
