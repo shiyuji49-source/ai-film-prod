@@ -1520,6 +1520,14 @@ function ShotWorkbench({
     },
     onError: (err) => toast.error(err.message),
   });
+  const updateSegment = trpc.overseas.updateVideoSegment.useMutation({
+    onSuccess: async () => {
+      toast.success("视频段设置已保存");
+      if (project) await utils.overseas.listVideoSegments.invalidate({ projectId: project.id });
+      onChanged();
+    },
+    onError: (err) => toast.error(err.message),
+  });
   const generateVideoSegment = trpc.overseas.generateVideoSegment.useMutation({
     onSuccess: async () => {
       toast.success("Seedance 2.0 视频已生成");
@@ -1548,6 +1556,18 @@ function ShotWorkbench({
     currentSegment?.shots.find((shot) => !shot.cameraDiagramUrl) ||
     activeShot;
   const currentError = currentSegment?.errorMessage || activeShot?.errorMessage || null;
+  const saveSegmentDraft = () => {
+    if (!currentSegment || typeof currentSegment.id !== "number") {
+      toast.info("当前视频段暂时不能保存");
+      return;
+    }
+    updateSegment.mutate({
+      id: currentSegment.id,
+      prompt: segmentPrompt,
+      duration,
+      referenceAssetIds: selectedAssetIds,
+    });
+  };
   const runNextSegmentAction = () => {
     if (!currentSegment || !activeShot || !project) return;
     if (segmentStats?.nextAction === "storyboard" && focusShot) {
@@ -1580,6 +1600,7 @@ function ShotWorkbench({
         generateVideoSegment.mutate({
           segmentId: currentSegment.id,
           prompt: segmentPrompt,
+          referenceAssetIds: selectedAssetIds,
           referenceImageUrls: referenceUrls,
           duration,
           aspectRatio,
@@ -1743,7 +1764,9 @@ function ShotWorkbench({
               onToggleAsset={toggleAsset}
               onClearAssets={() => setSelectedAssetIds([])}
               isPrompting={generateSegmentPrompt.isPending}
+              isSaving={updateSegment.isPending}
               isGenerating={generateVideoSegment.isPending || generateVideo.isPending}
+              onSaveDraft={saveSegmentDraft}
               onGeneratePrompt={() => {
                 if (!project || !currentSegment) return;
                 generateSegmentPrompt.mutate({
@@ -1761,6 +1784,7 @@ function ShotWorkbench({
                   generateVideoSegment.mutate({
                     segmentId: currentSegment.id,
                     prompt: segmentPrompt,
+                    referenceAssetIds: selectedAssetIds,
                     referenceImageUrls: referenceUrls,
                     duration,
                     aspectRatio,
@@ -1839,7 +1863,9 @@ function SeedanceComposer({
   onToggleAsset,
   onClearAssets,
   isPrompting,
+  isSaving,
   isGenerating,
+  onSaveDraft,
   onGeneratePrompt,
   onGenerateVideo,
 }: {
@@ -1857,7 +1883,9 @@ function SeedanceComposer({
   onToggleAsset: (assetId: number) => void;
   onClearAssets: () => void;
   isPrompting: boolean;
+  isSaving: boolean;
   isGenerating: boolean;
+  onSaveDraft: () => void;
   onGeneratePrompt: () => void;
   onGenerateVideo: () => void;
 }) {
@@ -1967,6 +1995,10 @@ function SeedanceComposer({
             {[8, 10, 12, 15].map((value) => <SelectItem key={value} value={String(value)}>{value}s</SelectItem>)}
           </SelectContent>
         </Select>
+        <Button variant="outline" disabled={disabled || isSaving} onClick={onSaveDraft} style={{ borderColor: C.line, borderRadius: 999, height: 32 }}>
+          {isSaving ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
+          保存设置
+        </Button>
         <Button variant="outline" disabled={disabled || isPrompting} onClick={onGeneratePrompt} style={{ borderColor: C.line, borderRadius: 999, height: 32, flex: compact ? "1 1 160px" : undefined }}>
           {isPrompting ? <Loader2 className="animate-spin" size={14} /> : <Wand2 size={14} />}
           生成15秒提示词

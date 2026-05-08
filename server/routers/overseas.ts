@@ -133,6 +133,7 @@ const updateVideoSegmentSchema = z.object({
 const premiumVideoSegmentVideoSchema = z.object({
   segmentId: z.number().int(),
   prompt: z.string().optional(),
+  referenceAssetIds: z.array(z.number().int()).max(9).optional(),
   referenceImageUrls: z.array(z.string().url()).max(9).optional(),
   duration: z.number().int().min(8).max(15).default(15),
   aspectRatio: z.enum(["16:9", "9:16"]).optional(),
@@ -3143,20 +3144,19 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
       const prompt = input.prompt?.trim() || segment.prompt || firstShot.videoPrompt;
       if (!prompt?.trim()) throw new Error("请先生成或填写 Seedance 2.0 视频提示词");
 
+      const referenceAssetIds = input.referenceAssetIds ?? parseNumberArray(segment.referenceAssetIds);
       let referenceImageUrls = input.referenceImageUrls?.length ? input.referenceImageUrls : parseStringArray(segment.referenceImageUrls);
-      if (referenceImageUrls.length === 0) {
-        const referenceAssetIds = parseNumberArray(segment.referenceAssetIds);
-        if (referenceAssetIds.length > 0) {
-          const ids = new Set(referenceAssetIds);
-          const assets = await db!.select().from(overseasAssets).where(
-            and(eq(overseasAssets.projectId, segment.projectId), eq(overseasAssets.userId, ctx.user.id))
-          );
-          referenceImageUrls = assets
-            .filter((asset) => ids.has(asset.id))
-            .map(assetImageUrl)
-            .filter((url): url is string => Boolean(url))
-            .slice(0, 9);
-        }
+      if (referenceAssetIds.length > 0) {
+        const assets = await db!.select().from(overseasAssets).where(
+          and(eq(overseasAssets.projectId, segment.projectId), eq(overseasAssets.userId, ctx.user.id))
+        );
+        const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
+        referenceImageUrls = referenceAssetIds
+          .map((id) => assetsById.get(id))
+          .filter((asset): asset is typeof overseasAssets.$inferSelect => Boolean(asset))
+          .map(assetImageUrl)
+          .filter((url): url is string => Boolean(url))
+          .slice(0, 9);
       }
 
       const duration = input.duration || segment.duration || 15;
@@ -3167,6 +3167,7 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
         .set({
           status: "generating_video",
           prompt,
+          referenceAssetIds: JSON.stringify(referenceAssetIds),
           referenceImageUrls: JSON.stringify(referenceImageUrls),
           duration,
           errorMessage: null,
@@ -3200,6 +3201,7 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
           .set({
             videoUrl: s3VideoUrl,
             prompt,
+            referenceAssetIds: JSON.stringify(referenceAssetIds),
             referenceImageUrls: JSON.stringify(referenceImageUrls),
             duration,
             status: "done",
