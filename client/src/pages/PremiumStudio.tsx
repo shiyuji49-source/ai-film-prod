@@ -841,7 +841,7 @@ function DefinitionView({
           </div>
           <Button onClick={save} disabled={createProject.isPending || updateProject.isPending} style={{ background: C.ink, color: "#fff", borderRadius: 8, minWidth: 140 }}>
             {createProject.isPending || updateProject.isPending ? <Loader2 className="animate-spin" size={15} /> : <Save size={15} />}
-            {project ? "保存项目" : "创建并分集"}
+            {project ? "保存项目" : "创建项目，进入分集"}
           </Button>
         </div>
       </section>
@@ -894,6 +894,7 @@ function ScriptSplitView({
 }) {
   const utils = trpc.useUtils();
   const [jobId, setJobId] = useState<number | null>(null);
+  const [quickStartPending, setQuickStartPending] = useState(false);
   const selectedEpisode = episodes.find((episode) => episode.episodeNumber === activeEpisode) ?? episodes[0];
   const splitScript = trpc.overseas.splitScriptIntoEpisodes.useMutation({
     onSuccess: (data) => {
@@ -951,6 +952,31 @@ function ScriptSplitView({
     });
   };
 
+  const quickStart = async () => {
+    if (!project) return toast.error("请先创建项目");
+    if (scriptText.trim().length < 10 && episodes.length === 0) return toast.error("请先粘贴剧本");
+    setQuickStartPending(true);
+    try {
+      const sourceEpisodes = episodes.length > 0
+        ? episodes
+        : (await splitScript.mutateAsync({ projectId: project.id, scriptText })).episodes;
+      onEpisodes(sourceEpisodes);
+      onActiveEpisode(sourceEpisodes[0]?.episodeNumber ?? 1);
+      const scripts = sourceEpisodes.map((episode) => ({ episodeNumber: episode.episodeNumber, scriptText: episode.scriptText }));
+      const data = await batchParse.mutateAsync({ projectId: project.id, scripts, language: "zh" });
+      setJobId(data.jobId);
+      analyzeAssets.mutate({
+        projectId: project.id,
+        scriptText: sourceEpisodes.map((episode) => `第${episode.episodeNumber}集\n${episode.scriptText}`).join("\n\n"),
+      });
+      toast.info("已开始：分集、资产识别、分镜设计");
+    } catch (err: any) {
+      toast.error(err.message || "一键制作启动失败");
+    } finally {
+      setQuickStartPending(false);
+    }
+  };
+
   return (
     <div style={{ height: "calc(100vh - 64px)", padding: 22, display: "grid", gridTemplateColumns: "minmax(380px, 0.9fr) minmax(360px, 0.8fr) 360px", gap: 16, overflow: "hidden" }}>
       <section style={card({ padding: 16, display: "grid", gridTemplateRows: "auto 1fr auto", gap: 12, minHeight: 0 })}>
@@ -959,10 +985,16 @@ function ScriptSplitView({
             <h2 style={{ margin: 0, fontSize: 17 }}>原始剧本</h2>
             <div style={tinyLabel()}>AI 自动识别集数，不需要手填集数和时长。</div>
           </div>
-          <Button variant="outline" disabled={!project || splitScript.isPending || !scriptText.trim()} onClick={() => project && splitScript.mutate({ projectId: project.id, scriptText })} style={{ borderColor: C.line, borderRadius: 8 }}>
-            {splitScript.isPending ? <Loader2 className="animate-spin" size={14} /> : <Layers size={14} />}
-            智能分集
-          </Button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button variant="outline" disabled={!project || splitScript.isPending || !scriptText.trim()} onClick={() => project && splitScript.mutate({ projectId: project.id, scriptText })} style={{ borderColor: C.line, borderRadius: 8 }}>
+              {splitScript.isPending ? <Loader2 className="animate-spin" size={14} /> : <Layers size={14} />}
+              智能分集
+            </Button>
+            <Button disabled={!project || quickStartPending || batchParse.isPending || !!jobId || (!scriptText.trim() && episodes.length === 0)} onClick={quickStart} style={{ background: C.ink, color: "#fff", borderRadius: 8 }}>
+              {quickStartPending || batchParse.isPending || jobId ? <Loader2 className="animate-spin" size={14} /> : <Wand2 size={14} />}
+              一键分集并生成分镜
+            </Button>
+          </div>
         </div>
         <Textarea value={scriptText} onChange={(event) => onScriptText(event.target.value)} placeholder="粘贴剧本。已有“第X集 / EP X”标记时会优先按原标记切分。" style={{ ...field(), resize: "none", minHeight: 0, lineHeight: 1.75 }} />
         {jobId && job && <div style={tinyLabel(C.purple)}>{job.currentName} · {job.current}/{job.total}</div>}
@@ -1015,6 +1047,31 @@ function ScriptSplitView({
   );
 }
 
+function defaultDirectorRules(project?: Project) {
+  const styleName = project ? getVisualStylePreset(project.visualStylePreset).name : "当前摄影风格";
+  return [
+    `导演规则：${project?.name ?? "未命名项目"}`,
+    "",
+    "1. 故事核心",
+    "每个视频段只服务一个明确的戏剧动作：推进关系、揭示信息、制造反转或放大情绪。不得新增剧本外设定，不得为了画面炫技改变人物动机。",
+    "",
+    "2. 表演规则",
+    "人物表演要保留潜台词和停顿。台词不是把情绪说满，而是让观众从眼神、呼吸、迟疑、转身、避开目光里读出真实意图。语气要克制，避免舞台腔和解释型表演。",
+    "",
+    "3. 分镜与视频段",
+    "多个分镜可合并为一条约 15 秒 Seedance 2.0 提示词。合并依据是同一场景、同一情绪连续、同一人物行动链。台词、动作、视线、走位和摄影机运动要按剧情节奏智能分配，不固定切成 0-3/3-10/10-15。",
+    "",
+    "4. 固定资产参考",
+    "人物、场景、服装、道具外观以资产库参考图为准。提示词只描述表演、调度、摄影机、光影和动作连续性，不重新发明人物长相或场景结构。",
+    "",
+    "5. 摄影风格",
+    `画面遵循「${styleName}」方向。优先控制光影、空气感、低照度或高反差等摄影质感，不写泛泛的滤镜词，不堆砌无关镜头型号。`,
+    "",
+    "6. 禁止事项",
+    "不要出现字幕、水印、旁白提示、解释性文字、跳戏喜剧表演、夸张网感特效。不要让人物无目的移动，不要让摄影机运动抢走表演重点。",
+  ].join("\n");
+}
+
 function DirectorRulesView({ project, scriptText, onSaved }: { project?: Project; scriptText: string; onSaved: () => void }) {
   const utils = trpc.useUtils();
   const [rules, setRules] = useState(project?.projectBible ?? "");
@@ -1043,6 +1100,11 @@ function DirectorRulesView({ project, scriptText, onSaved }: { project?: Project
     if (source.trim().length < 10) return toast.error("请先在项目定义或剧本分集里提供足够文本");
     bible.mutate({ projectId: project.id, scriptText: source });
   };
+  const useDefaultRules = () => {
+    const nextRules = defaultDirectorRules(project);
+    setRules(nextRules);
+    if (project) updateProject.mutate({ id: project.id, projectBible: nextRules });
+  };
 
   const sections = [
     ["故事核心", "主线冲突、人物目标、每集钩子原则"],
@@ -1069,10 +1131,16 @@ function DirectorRulesView({ project, scriptText, onSaved }: { project?: Project
         </div>
         <Textarea value={rules} onChange={(event) => setRules(event.target.value)} placeholder="AI 生成后可编辑。它只影响表演、节奏、分镜和提示词，不锁定人物长相和场景外观。" style={{ ...field(), resize: "none", minHeight: 0, lineHeight: 1.75 }} />
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-          <Button variant="outline" disabled={bible.isPending || !project} onClick={generate} style={{ borderColor: C.line, borderRadius: 8 }}>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button variant="outline" disabled={!project || updateProject.isPending} onClick={useDefaultRules} style={{ borderColor: C.line, borderRadius: 8 }}>
+              <Check size={14} />
+              使用默认规则
+            </Button>
+            <Button variant="outline" disabled={bible.isPending || !project} onClick={generate} style={{ borderColor: C.line, borderRadius: 8 }}>
             {bible.isPending ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />}
             AI 生成导演规则
-          </Button>
+            </Button>
+          </div>
           <Button disabled={!project || updateProject.isPending} onClick={() => project && updateProject.mutate({ id: project.id, projectBible: rules })} style={{ background: C.ink, color: "#fff", borderRadius: 8 }}>
             {updateProject.isPending ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
             保存规则
