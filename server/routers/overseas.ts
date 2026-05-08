@@ -453,7 +453,6 @@ export const overseasRouter = router({
   createProject: protectedProcedure.input(createProjectSchema).mutation(async ({ ctx, input }) => {
     const stylePreset = getVisualStylePreset(input.visualStylePreset);
     const { selectedIds } = validateStyleEnhancers(parseStyleEnhancers(input.styleEnhancers));
-    const visualStylePrompt = input.visualStylePrompt?.trim() || buildVisualStylePrompt(stylePreset, selectedIds);
     const [result] = await (await getDb())!.insert(overseasProjects).values({
       userId: ctx.user.id,
       name: input.name,
@@ -464,7 +463,7 @@ export const overseasRouter = router({
       genre: input.genre,
       visualStylePreset: stylePreset.id,
       styleEnhancers: JSON.stringify(selectedIds),
-      visualStylePrompt,
+      visualStylePrompt: input.visualStylePrompt?.trim() || null,
       projectBible: input.projectBible,
       totalEpisodes: input.totalEpisodes,
       projectType: "premium",
@@ -479,11 +478,19 @@ export const overseasRouter = router({
   // ── 更新项目 ──────────────────────────────────────────────────────────────
   updateProject: protectedProcedure.input(updateProjectSchema).mutation(async ({ ctx, input }) => {
     const { id, ...rest } = input;
-    const styleEnhancers = parseStyleEnhancers(rest.styleEnhancers);
-    if (rest.visualStylePreset && !rest.visualStylePrompt?.trim()) {
-      rest.visualStylePrompt = buildVisualStylePrompt(getVisualStylePreset(rest.visualStylePreset), styleEnhancers);
+    const [existingProject] = await (await getDb())!
+      .select()
+      .from(overseasProjects)
+      .where(and(eq(overseasProjects.id, id), eq(overseasProjects.userId, ctx.user.id)));
+    if (!existingProject) throw new Error("Project not found");
+    if (Object.keys(rest).length === 0) {
+      return existingProject;
     }
-    if (rest.styleEnhancers) {
+    const styleEnhancers = parseStyleEnhancers(rest.styleEnhancers);
+    if (rest.visualStylePreset) {
+      rest.visualStylePreset = getVisualStylePreset(rest.visualStylePreset).id;
+    }
+    if (rest.styleEnhancers !== undefined) {
       rest.styleEnhancers = JSON.stringify(validateStyleEnhancers(styleEnhancers).selectedIds);
     }
     await (await getDb())!
@@ -549,6 +556,7 @@ export const overseasRouter = router({
         .update(overseasProjects)
         .set({
           projectBible: bible.projectBible,
+          visualStylePrompt: bible.visualRules,
           characters: JSON.stringify(bible.mainCharacters),
           scenes: JSON.stringify(bible.coreLocations),
         })

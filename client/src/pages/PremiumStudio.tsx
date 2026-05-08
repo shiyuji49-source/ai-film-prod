@@ -39,13 +39,6 @@ import {
   Upload,
   Wand2,
 } from "lucide-react";
-import {
-  STYLE_ENHANCERS,
-  VISUAL_STYLE_PRESETS,
-  buildVisualStylePrompt,
-  getVisualStylePreset,
-  validateStyleEnhancers,
-} from "@shared/visualStyles";
 
 const C = {
   app: "#f7f7f4",
@@ -132,7 +125,7 @@ type SplitEpisode = {
   scriptText: string;
 };
 
-type ModuleKey = "overview" | "definition" | "script" | "rules" | "assets" | "shots" | "records";
+type ModuleKey = "overview" | "definition" | "script" | "assets" | "shots" | "video" | "records";
 
 type VideoSegment = {
   id: string | number;
@@ -154,9 +147,9 @@ const navItems: Array<{ key: ModuleKey; label: string; icon: ReactNode }> = [
   { key: "overview", label: "总览", icon: <Home size={16} /> },
   { key: "definition", label: "项目定义", icon: <Film size={16} /> },
   { key: "script", label: "剧本分集", icon: <FileText size={16} /> },
-  { key: "rules", label: "导演规则", icon: <Lock size={16} /> },
   { key: "assets", label: "资产库", icon: <Boxes size={16} /> },
-  { key: "shots", label: "镜头工作台", icon: <Clapperboard size={16} /> },
+  { key: "shots", label: "分镜设计", icon: <Clapperboard size={16} /> },
+  { key: "video", label: "视频生成", icon: <Play size={16} /> },
   { key: "records", label: "生成记录", icon: <Archive size={16} /> },
 ];
 
@@ -227,17 +220,6 @@ function assetImage(asset: Asset) {
 function assetTag(asset: Asset) {
   const prefix = asset.type === "storyboard" ? "分镜" : asset.type === "camera_diagram" ? "机位" : asset.name;
   return `@${prefix.replace(/\s+/g, "")}`;
-}
-
-function parseStyleEnhancers(value?: string | null): string[] {
-  if (!value) return [];
-  try {
-    const parsed = JSON.parse(value);
-    if (Array.isArray(parsed)) return parsed.filter((item): item is string => typeof item === "string").slice(0, 5);
-  } catch {
-    return value.split(",").map((item) => item.trim()).filter(Boolean).slice(0, 5);
-  }
-  return [];
 }
 
 function fileToBase64(file: File) {
@@ -411,7 +393,7 @@ function StudioShell() {
   }, [activeProjectId, projects]);
 
   const subtitle = project
-    ? `${project.aspectRatio === "portrait" ? "9:16 竖屏" : "16:9 横屏"} · ${getVisualStylePreset(project.visualStylePreset).name}`
+    ? `${project.aspectRatio === "portrait" ? "9:16 竖屏" : "16:9 横屏"} · AI制作方案驱动`
     : "固定资产参考驱动的 Seedance 2.0 精品剧工作台";
 
   return (
@@ -477,10 +459,23 @@ function StudioShell() {
               onOpenShots={openShots}
             />
           )}
-          {module === "rules" && <DirectorRulesView project={project} scriptText={scriptText} onSaved={() => projectQuery.refetch()} />}
           {module === "assets" && <AssetsView project={project} />}
           {module === "shots" && (
             <ShotWorkbench
+              mode="storyboard"
+              project={project}
+              shots={shots}
+              activeEpisode={activeEpisode}
+              activeSegmentId={activeSegmentId}
+              onActiveEpisode={setActiveEpisode}
+              onActiveSegment={setActiveSegmentId}
+              onOpenVideo={() => setModule("video")}
+              onChanged={() => projectQuery.refetch()}
+            />
+          )}
+          {module === "video" && (
+            <ShotWorkbench
+              mode="video"
               project={project}
               shots={shots}
               activeEpisode={activeEpisode}
@@ -573,7 +568,7 @@ function Sidebar({
               }}
             >
               <div style={{ fontSize: 13, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{project.name}</div>
-              <div style={{ ...tinyLabel(C.dim), marginTop: 5 }}>{project.aspectRatio === "portrait" ? "9:16" : "16:9"} · {getVisualStylePreset(project.visualStylePreset).name}</div>
+              <div style={{ ...tinyLabel(C.dim), marginTop: 5 }}>{project.aspectRatio === "portrait" ? "9:16" : "16:9"} · AI制作方案</div>
             </button>
           ))}
           {projects.length === 0 && <div style={{ ...tinyLabel(C.dim), lineHeight: 1.7 }}>还没有项目。点击上方 + 创建第一个精品剧。</div>}
@@ -637,10 +632,17 @@ function OverviewView({
     },
     {
       module: "shots",
-      label: "镜头工作台",
-      value: videoSegmentCount ? `${videoSegmentCount} 个视频段` : "待分段",
-      state: videoSegmentCount ? "done" : shots.length ? "active" : "idle",
+      label: "分镜设计",
+      value: shots.length ? `${shots.length} 个分镜` : "待拆镜",
+      state: storyboardReady === shots.length && shots.length > 0 ? "done" : shots.length ? "active" : "idle",
       icon: <Clapperboard size={17} />,
+    },
+    {
+      module: "video",
+      label: "视频生成",
+      value: videoSegmentCount ? `${videoSegmentCount} 个视频段` : "待分段",
+      state: videoSegmentCount && promptReady === videoSegmentCount ? "done" : videoSegmentCount ? "active" : "idle",
+      icon: <Play size={17} />,
     },
     {
       module: "records",
@@ -653,6 +655,7 @@ function OverviewView({
   const nextStage = stages.find((stage) => stage.state !== "done") ?? stages[stages.length - 1];
   const todoItems = [
     !project?.definition?.trim() ? "完善项目定义" : null,
+    project && (!project.projectBible || !project.visualStylePrompt) ? "生成AI制作方案" : null,
     shots.length === 0 ? "导入剧本并分集" : null,
     fixedAssets.length === 0 && shots.length > 0 ? "添加固定参考资产" : null,
     storyboardReady < shots.length && shots.length > 0 ? "补齐分镜草图" : null,
@@ -668,7 +671,7 @@ function OverviewView({
           <div style={{ ...tinyLabel(C.gold), fontWeight: 900, marginBottom: 8 }}>AI 影片生产总览</div>
           <h1 style={{ margin: 0, fontSize: 24 }}>{project?.name ?? "创建一个精品剧项目"}</h1>
           <div style={{ ...tinyLabel(), marginTop: 8 }}>
-            {project ? `${project.aspectRatio === "portrait" ? "9:16" : "16:9"} · ${getVisualStylePreset(project.visualStylePreset).name}` : "固定资产参考 + 分镜视频段 + Seedance 2.0 多参生成"}
+            {project ? `${project.aspectRatio === "portrait" ? "9:16" : "16:9"} · AI制作方案驱动` : "固定资产参考 + 分镜视频段 + Seedance 2.0 多参生成"}
           </div>
         </div>
         <Button onClick={() => onModule(nextStage.module)} style={{ background: C.ink, color: "#fff", borderRadius: 8, minWidth: 132 }}>
@@ -679,7 +682,7 @@ function OverviewView({
 
       <section style={{ minHeight: 0, display: "grid", gridTemplateColumns: compact ? "1fr" : "minmax(0, 1fr) 340px", gap: 16, overflow: compact ? "visible" : "hidden" }}>
         <div style={card({ padding: 18, minHeight: 0, overflow: "auto" })}>
-          <div style={{ display: "grid", gridTemplateColumns: compact ? "repeat(auto-fit, minmax(150px, 1fr))" : "repeat(5, minmax(130px, 1fr))", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: compact ? "repeat(auto-fit, minmax(150px, 1fr))" : "repeat(6, minmax(120px, 1fr))", gap: 10 }}>
             {stages.map((stage, index) => (
               <button
                 key={stage.module}
@@ -779,21 +782,14 @@ function DefinitionView({
   const [name, setName] = useState(project?.name ?? "");
   const [definition, setDefinition] = useState(project?.definition ?? "");
   const [aspectRatio, setAspectRatio] = useState<Project["aspectRatio"]>(project?.aspectRatio ?? "portrait");
-  const [presetId, setPresetId] = useState(project?.visualStylePreset ?? "natural_practical_light");
-  const [enhancerIds, setEnhancerIds] = useState<string[]>(parseStyleEnhancers(project?.styleEnhancers));
 
   useEffect(() => {
     setName(project?.name ?? "");
     setDefinition(project?.definition ?? "");
     setAspectRatio(project?.aspectRatio ?? "portrait");
-    setPresetId(project?.visualStylePreset ?? "natural_practical_light");
-    setEnhancerIds(parseStyleEnhancers(project?.styleEnhancers));
   }, [project?.id]);
 
   const utils = trpc.useUtils();
-  const preset = getVisualStylePreset(presetId);
-  const enhancerState = validateStyleEnhancers(enhancerIds);
-  const visualStylePrompt = buildVisualStylePrompt(preset, enhancerState.selectedIds);
   const createProject = trpc.overseas.createProject.useMutation({
     onSuccess: async (created) => {
       toast.success("项目已创建");
@@ -810,6 +806,14 @@ function DefinitionView({
     },
     onError: (err) => toast.error(err.message),
   });
+  const generatePlan = trpc.overseas.generateProjectBible.useMutation({
+    onSuccess: async () => {
+      toast.success("AI制作方案已生成，会影响后续分镜、机位图和视频提示词");
+      if (project) await utils.overseas.getProject.invalidate({ id: project.id });
+      onSaved();
+    },
+    onError: (err) => toast.error(err.message),
+  });
 
   const save = () => {
     if (!name.trim()) {
@@ -822,27 +826,30 @@ function DefinitionView({
       market: "cn",
       aspectRatio,
       style: "realistic" as const,
-      genre: preset.id,
-      visualStylePreset: preset.id,
-      styleEnhancers: JSON.stringify(enhancerState.selectedIds),
-      visualStylePrompt,
+      genre: "ai_analyzed",
+      visualStylePreset: project?.visualStylePreset ?? "natural_practical_light",
+      styleEnhancers: "[]",
       projectType: "premium" as const,
     };
     if (project) updateProject.mutate({ id: project.id, ...payload });
-    else createProject.mutate({
-      ...payload,
-      projectBible: defaultDirectorRules({ name: name.trim(), visualStylePreset: preset.id }),
-    });
+    else createProject.mutate(payload);
   };
+  const generateAiPlan = () => {
+    if (!project) return toast.error("请先创建项目");
+    const source = scriptText.trim() || definition.trim() || project.definition || "";
+    if (source.trim().length < 10) return toast.error("请先粘贴剧本，或补充项目设定");
+    generatePlan.mutate({ projectId: project.id, scriptText: source });
+  };
+  const planText = [project?.visualStylePrompt, project?.projectBible].filter(Boolean).join("\n\n");
 
   return (
     <div style={{ height: compact ? "auto" : "calc(100vh - 64px)", minHeight: compact ? "calc(100vh - 136px)" : undefined, padding: compact ? 14 : 22, display: "grid", gridTemplateColumns: compact ? "1fr" : "minmax(520px, 1fr) 320px", gap: 18, overflow: compact ? "auto" : "hidden" }}>
       <section style={card({ padding: 18, display: "grid", gridTemplateRows: "auto auto 1fr auto", gap: 14, minHeight: 0 })}>
         <div>
           <h1 style={{ margin: 0, fontSize: 20 }}>项目定义</h1>
-          <div style={{ ...tinyLabel(), marginTop: 6 }}>只保留项目名、画幅、剧本和摄影风格，不再让用户填写集数和时长。</div>
+          <div style={{ ...tinyLabel(), marginTop: 6 }}>只填写项目名、画幅和剧本。视觉风格由 AI 读剧本后自动判断，不让用户选择固定风格。</div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: compact ? "1fr" : "1fr 170px 220px", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: compact ? "1fr" : "1fr 170px", gap: 10 }}>
           <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="项目名称" style={field()} />
           <Select value={aspectRatio} onValueChange={(value) => setAspectRatio(value as Project["aspectRatio"])}>
             <SelectTrigger style={field()}><SelectValue /></SelectTrigger>
@@ -851,28 +858,13 @@ function DefinitionView({
               <SelectItem value="landscape">16:9 横屏</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={presetId} onValueChange={setPresetId}>
-            <SelectTrigger style={field()}><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {VISUAL_STYLE_PRESETS.map((presetItem) => <SelectItem key={presetItem.id} value={presetItem.id}>{presetItem.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
         </div>
         <div style={{ display: "grid", gridTemplateRows: compact ? "120px minmax(260px, 1fr)" : "120px 1fr", gap: 10, minHeight: 0 }}>
           <Textarea value={definition} onChange={(event) => setDefinition(event.target.value)} placeholder="项目一句话设定、核心人物关系、必须保留或禁止的内容" style={{ ...field(), resize: "none", lineHeight: 1.7 }} />
           <Textarea value={scriptText} onChange={(event) => onScriptText(event.target.value)} placeholder="粘贴完整剧本，或者先创建项目后到“剧本分集”页继续粘贴。" style={{ ...field(), resize: "none", minHeight: 0, lineHeight: 1.75 }} />
         </div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {STYLE_ENHANCERS.slice(0, 8).map((tag) => {
-              const selected = enhancerIds.includes(tag.id);
-              return (
-                <button key={tag.id} type="button" onClick={() => setEnhancerIds((prev) => selected ? prev.filter((id) => id !== tag.id) : [...prev, tag.id].slice(0, 5))} style={pill(selected)}>
-                  {tag.label}
-                </button>
-              );
-            })}
-          </div>
+          <div style={{ ...tinyLabel(), lineHeight: 1.6 }}>AI制作方案会在剧本分集前自动生成；你也可以在这里手动生成一次。</div>
           <Button onClick={save} disabled={createProject.isPending || updateProject.isPending} style={{ background: C.ink, color: "#fff", borderRadius: 8, minWidth: 140 }}>
             {createProject.isPending || updateProject.isPending ? <Loader2 className="animate-spin" size={15} /> : <Save size={15} />}
             {project ? "保存项目" : "创建项目，进入分集"}
@@ -884,7 +876,7 @@ function DefinitionView({
           <div style={{ fontSize: 14, fontWeight: 900, marginBottom: 12 }}>项目准备状态</div>
           {[
             ["剧本", scriptText.trim() ? "已导入" : "未导入"],
-            ["导演规则", project?.projectBible ? "已生成" : "未生成"],
+            ["AI制作方案", project?.projectBible && project?.visualStylePrompt ? "已生成" : "未生成"],
             ["资产库", "待整理"],
             ["视频段", "待拆解"],
           ].map(([label, value]) => (
@@ -895,12 +887,20 @@ function DefinitionView({
           ))}
         </section>
         <section style={card({ padding: 16 })}>
-          <div style={{ fontSize: 14, fontWeight: 900, marginBottom: 8 }}>视觉风格摘要</div>
-          <div style={{ ...tinyLabel(), whiteSpace: "pre-wrap", maxHeight: 210, overflow: "auto" }}>{visualStylePrompt}</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+            <div style={{ fontSize: 14, fontWeight: 900 }}>AI制作方案</div>
+            <Button size="sm" variant="outline" disabled={!project || generatePlan.isPending} onClick={generateAiPlan} style={{ borderColor: C.line, borderRadius: 8 }}>
+              {generatePlan.isPending ? <Loader2 className="animate-spin" size={13} /> : <Wand2 size={13} />}
+              生成
+            </Button>
+          </div>
+          <div style={{ ...tinyLabel(), whiteSpace: "pre-wrap", maxHeight: 240, overflow: "auto", lineHeight: 1.7 }}>
+            {planText || "上传或粘贴剧本后，AI 会根据类型、人物关系、场景、情绪和平台观感，自动生成摄影光影、节奏、表演留白和禁止事项。这部分会传给后续分镜、机位图和 Seedance 2.0 提示词。"}
+          </div>
         </section>
         <section style={card({ padding: 16, minHeight: 0, overflow: "auto" })}>
           <div style={{ fontSize: 14, fontWeight: 900, marginBottom: 8 }}>下一步</div>
-          <div style={{ ...tinyLabel(), lineHeight: 1.7 }}>创建项目后进入“剧本分集”，由 AI 自动识别集数，再拆成分镜镜头。后续多个分镜会合成 15 秒左右的视频段。</div>
+          <div style={{ ...tinyLabel(), lineHeight: 1.7 }}>创建项目后进入“剧本分集”。系统会先生成 AI制作方案，再自动识别集数、拆成分镜镜头，后续多个分镜合成 15 秒左右的视频段。</div>
         </section>
       </aside>
     </div>
@@ -952,6 +952,14 @@ function ScriptSplitView({
     onSuccess: (data: any) => toast.success(`资产识别完成：新增 ${data.addedCount ?? 0} 个`),
     onError: (err) => toast.error(err.message),
   });
+  const generatePlan = trpc.overseas.generateProjectBible.useMutation({
+    onSuccess: async () => {
+      toast.success("AI制作方案已生成");
+      if (project) await utils.overseas.getProject.invalidate({ id: project.id });
+      onChanged();
+    },
+    onError: (err) => toast.error(`AI制作方案生成失败：${err.message}`),
+  });
   const { data: job } = trpc.overseas.getBatchJob.useQuery(
     { jobId: jobId! },
     { enabled: jobId !== null, refetchInterval: jobId ? 2500 : false }
@@ -969,7 +977,14 @@ function ScriptSplitView({
     })();
   }, [job, onChanged, onOpenShots, project, utils]);
 
-  const startStoryboard = () => {
+  const prepareProjectPlan = async (sourceEpisodes: SplitEpisode[]) => {
+    if (!project) return;
+    if (project.projectBible && project.visualStylePrompt) return;
+    const planSource = sourceEpisodes.map((episode) => `第${episode.episodeNumber}集\n${episode.scriptText}`).join("\n\n");
+    await generatePlan.mutateAsync({ projectId: project.id, scriptText: planSource });
+  };
+
+  const startStoryboard = async () => {
     if (!project) {
       toast.error("请先创建项目");
       return;
@@ -980,6 +995,11 @@ function ScriptSplitView({
     if (sourceEpisodes.some((episode) => episode.scriptText.trim().length < 10)) {
       toast.error("剧本文本不足");
       return;
+    }
+    try {
+      await prepareProjectPlan(sourceEpisodes);
+    } catch {
+      // 已通过 mutation toast 告知，允许用户继续拆分镜。
     }
     batchParse.mutate({
       projectId: project.id,
@@ -1002,6 +1022,11 @@ function ScriptSplitView({
         : (await splitScript.mutateAsync({ projectId: project.id, scriptText })).episodes;
       onEpisodes(sourceEpisodes);
       onActiveEpisode(sourceEpisodes[0]?.episodeNumber ?? 1);
+      try {
+        await prepareProjectPlan(sourceEpisodes);
+      } catch {
+        // 制作方案失败时不拦住分镜，后续仍可在项目定义里重试。
+      }
       const scripts = sourceEpisodes.map((episode) => ({ episodeNumber: episode.episodeNumber, scriptText: episode.scriptText }));
       const data = await batchParse.mutateAsync({ projectId: project.id, scripts, language: "zh" });
       setJobId(data.jobId);
@@ -1009,7 +1034,7 @@ function ScriptSplitView({
         projectId: project.id,
         scriptText: sourceEpisodes.map((episode) => `第${episode.episodeNumber}集\n${episode.scriptText}`).join("\n\n"),
       });
-      toast.info("已开始：分集、资产识别、分镜设计");
+      toast.info("已开始：AI制作方案、分集、资产识别、分镜设计");
     } catch (err: any) {
       toast.error(err.message || "一键制作启动失败");
     } finally {
@@ -1078,9 +1103,9 @@ function ScriptSplitView({
               {splitScript.isPending ? <Loader2 className="animate-spin" size={14} /> : <Layers size={14} />}
               智能分集
             </Button>
-            <Button disabled={!project || quickStartPending || batchParse.isPending || !!jobId || (!scriptText.trim() && episodes.length === 0)} onClick={quickStart} style={{ background: C.ink, color: "#fff", borderRadius: 8 }}>
-              {quickStartPending || batchParse.isPending || jobId ? <Loader2 className="animate-spin" size={14} /> : <Wand2 size={14} />}
-              一键分集并生成分镜
+            <Button disabled={!project || quickStartPending || generatePlan.isPending || batchParse.isPending || !!jobId || (!scriptText.trim() && episodes.length === 0)} onClick={quickStart} style={{ background: C.ink, color: "#fff", borderRadius: 8 }}>
+              {quickStartPending || generatePlan.isPending || batchParse.isPending || jobId ? <Loader2 className="animate-spin" size={14} /> : <Wand2 size={14} />}
+              一键分析并生成分镜
             </Button>
           </div>
         </div>
@@ -1090,8 +1115,8 @@ function ScriptSplitView({
       <section style={card({ padding: 16, minHeight: 0, overflow: "auto" })}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
           <h2 style={{ margin: 0, fontSize: 17 }}>AI 分集结果</h2>
-          <Button disabled={!project || batchParse.isPending || !!jobId} onClick={startStoryboard} style={{ background: C.ink, color: "#fff", borderRadius: 8 }}>
-            {batchParse.isPending || jobId ? <Loader2 className="animate-spin" size={14} /> : <Wand2 size={14} />}
+          <Button disabled={!project || generatePlan.isPending || batchParse.isPending || !!jobId} onClick={startStoryboard} style={{ background: C.ink, color: "#fff", borderRadius: 8 }}>
+            {generatePlan.isPending || batchParse.isPending || jobId ? <Loader2 className="animate-spin" size={14} /> : <Wand2 size={14} />}
             生成分镜
           </Button>
         </div>
@@ -1141,120 +1166,6 @@ function ScriptSplitView({
           <Button variant="outline" disabled={!selectedEpisode} onClick={deleteSelectedEpisode} style={{ borderColor: C.line, borderRadius: 8, color: C.red }}>删除当前</Button>
         </div>
       </section>
-    </div>
-  );
-}
-
-function defaultDirectorRules(project?: Pick<Project, "name" | "visualStylePreset">) {
-  const styleName = project ? getVisualStylePreset(project.visualStylePreset).name : "当前摄影风格";
-  return [
-    `导演规则：${project?.name ?? "未命名项目"}`,
-    "",
-    "1. 故事核心",
-    "每个视频段只服务一个明确的戏剧动作：推进关系、揭示信息、制造反转或放大情绪。不得新增剧本外设定，不得为了画面炫技改变人物动机。",
-    "",
-    "2. 表演规则",
-    "人物表演要保留潜台词和停顿。台词不是把情绪说满，而是让观众从眼神、呼吸、迟疑、转身、避开目光里读出真实意图。语气要克制，避免舞台腔和解释型表演。",
-    "",
-    "3. 分镜与视频段",
-    "多个分镜可合并为一条约 15 秒 Seedance 2.0 提示词。合并依据是同一场景、同一情绪连续、同一人物行动链。台词、动作、视线、走位和摄影机运动要按剧情节奏智能分配，不固定切成 0-3/3-10/10-15。",
-    "",
-    "4. 固定资产参考",
-    "人物、场景、服装、道具外观以资产库参考图为准。提示词只描述表演、调度、摄影机、光影和动作连续性，不重新发明人物长相或场景结构。",
-    "",
-    "5. 摄影风格",
-    `画面遵循「${styleName}」方向。优先控制光影、空气感、低照度或高反差等摄影质感，不写泛泛的滤镜词，不堆砌无关镜头型号。`,
-    "",
-    "6. 禁止事项",
-    "不要出现字幕、水印、旁白提示、解释性文字、跳戏喜剧表演、夸张网感特效。不要让人物无目的移动，不要让摄影机运动抢走表演重点。",
-  ].join("\n");
-}
-
-function DirectorRulesView({ project, scriptText, onSaved }: { project?: Project; scriptText: string; onSaved: () => void }) {
-  const compact = useCompactLayout();
-  const utils = trpc.useUtils();
-  const [rules, setRules] = useState(project?.projectBible ?? "");
-  useEffect(() => setRules(project?.projectBible ?? ""), [project?.id, project?.projectBible]);
-
-  const bible = trpc.overseas.generateProjectBible.useMutation({
-    onSuccess: async (data) => {
-      setRules(data.projectBible);
-      toast.success("导演规则已生成");
-      if (project) await utils.overseas.getProject.invalidate({ id: project.id });
-      onSaved();
-    },
-    onError: (err) => toast.error(err.message),
-  });
-  const updateProject = trpc.overseas.updateProject.useMutation({
-    onSuccess: () => {
-      toast.success("导演规则已保存");
-      onSaved();
-    },
-    onError: (err) => toast.error(err.message),
-  });
-
-  const generate = () => {
-    if (!project) return toast.error("请先创建项目");
-    const source = scriptText.trim() || project.definition || "";
-    if (source.trim().length < 10) return toast.error("请先在项目定义或剧本分集里提供足够文本");
-    bible.mutate({ projectId: project.id, scriptText: source });
-  };
-  const useDefaultRules = () => {
-    const nextRules = defaultDirectorRules(project);
-    setRules(nextRules);
-    if (project) updateProject.mutate({ id: project.id, projectBible: nextRules });
-  };
-
-  const sections = [
-    ["故事核心", "主线冲突、人物目标、每集钩子原则"],
-    ["人物关系", "人物之间的权力、情感、隐瞒与冲突"],
-    ["表演规则", "语气、潜台词、沉默、呼吸和微表情"],
-    ["镜头节奏", "分镜密度、视频段合并、时长判断"],
-    ["禁止跑偏项", "不要新增剧情、不要脱离固定资产参考"],
-  ];
-
-  return (
-    <div style={{ height: compact ? "auto" : "calc(100vh - 64px)", minHeight: compact ? "calc(100vh - 136px)" : undefined, padding: compact ? 14 : 22, display: "grid", gridTemplateColumns: compact ? "1fr" : "1fr 340px", gap: 16, overflow: compact ? "auto" : "hidden" }}>
-      <section style={card({ padding: 18, minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr auto", gap: 14 })}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 20 }}>导演规则</h1>
-          <div style={{ ...tinyLabel(), marginTop: 6 }}>服务于拆镜头、表演留白、节奏判断和 Seedance 提示词，不负责人物/场景外观一致性。</div>
-        </div>
-        <div style={{ display: "grid", gridTemplateColumns: compact ? "repeat(auto-fit, minmax(130px, 1fr))" : "repeat(5, 1fr)", gap: 8 }}>
-          {sections.map(([title, desc]) => (
-            <div key={title} style={card({ padding: 12, background: C.panelSoft })}>
-              <div style={{ fontSize: 13, fontWeight: 900 }}>{title}</div>
-              <div style={{ ...tinyLabel(), marginTop: 6 }}>{desc}</div>
-            </div>
-          ))}
-        </div>
-        <Textarea value={rules} onChange={(event) => setRules(event.target.value)} placeholder="AI 生成后可编辑。它只影响表演、节奏、分镜和提示词，不锁定人物长相和场景外观。" style={{ ...field(), resize: "none", minHeight: 0, lineHeight: 1.75 }} />
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button variant="outline" disabled={!project || updateProject.isPending} onClick={useDefaultRules} style={{ borderColor: C.line, borderRadius: 8 }}>
-              <Check size={14} />
-              使用默认规则
-            </Button>
-            <Button variant="outline" disabled={bible.isPending || !project} onClick={generate} style={{ borderColor: C.line, borderRadius: 8 }}>
-            {bible.isPending ? <Loader2 className="animate-spin" size={14} /> : <Sparkles size={14} />}
-            AI 生成导演规则
-            </Button>
-          </div>
-          <Button disabled={!project || updateProject.isPending} onClick={() => project && updateProject.mutate({ id: project.id, projectBible: rules })} style={{ background: C.ink, color: "#fff", borderRadius: 8 }}>
-            {updateProject.isPending ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
-            保存规则
-          </Button>
-        </div>
-      </section>
-      <aside style={card({ padding: 16, alignSelf: "start" })}>
-        <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 12 }}>规则使用范围</div>
-        {["智能分镜", "视频段合并", "15秒提示词", "表演潜台词", "镜头节奏"].map((item) => (
-          <div key={item} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", borderTop: `1px solid ${C.line}` }}>
-            <Check size={14} style={{ color: C.green }} />
-            <span style={tinyLabel(C.text)}>{item}</span>
-          </div>
-        ))}
-      </aside>
     </div>
   );
 }
@@ -1499,23 +1410,28 @@ function AssetsView({ project }: { project?: Project }) {
 }
 
 function ShotWorkbench({
+  mode = "storyboard",
   project,
   shots,
   activeEpisode,
   activeSegmentId,
   onActiveEpisode,
   onActiveSegment,
+  onOpenVideo,
   onChanged,
 }: {
+  mode?: "storyboard" | "video";
   project?: Project;
   shots: Shot[];
   activeEpisode: number;
   activeSegmentId: string | number | null;
   onActiveEpisode: (episode: number) => void;
   onActiveSegment: (id: string | number) => void;
+  onOpenVideo?: () => void;
   onChanged: () => void;
 }) {
   const compact = useCompactLayout(1180);
+  const videoMode = mode === "video";
   const utils = trpc.useUtils();
   const fallbackSegments = useMemo(() => buildSegments(shots), [shots]);
   const { data: segmentData = [] } = trpc.overseas.listVideoSegments.useQuery(
@@ -1647,6 +1563,10 @@ function ShotWorkbench({
   };
   const runNextSegmentAction = () => {
     if (!currentSegment || !activeShot || !project) return;
+    if (!videoMode && (segmentStats?.nextAction === "asset" || segmentStats?.nextAction === "prompt" || segmentStats?.nextAction === "video")) {
+      onOpenVideo?.();
+      return;
+    }
     if (segmentStats?.nextAction === "storyboard" && focusShot) {
       setActiveShotId(focusShot.id);
       generateStoryboard.mutate({ shotId: focusShot.id, imageEngine: "image2", addToAssetLibrary: false });
@@ -1693,9 +1613,12 @@ function ShotWorkbench({
       }
     }
   };
+  const primaryActionLabel = !videoMode && (segmentStats?.nextAction === "asset" || segmentStats?.nextAction === "prompt" || segmentStats?.nextAction === "video")
+    ? "进入视频生成"
+    : (segmentStats?.nextLabel ?? "下一步");
 
   return (
-    <div style={{ height: compact ? "auto" : "calc(100vh - 64px)", minHeight: compact ? "calc(100vh - 136px)" : undefined, padding: compact ? 14 : 18, display: "grid", gridTemplateColumns: compact ? "1fr" : "250px minmax(520px, 1fr) 330px", gap: 14, overflow: compact ? "auto" : "hidden" }}>
+    <div style={{ height: compact ? "auto" : "calc(100vh - 64px)", minHeight: compact ? "calc(100vh - 136px)" : undefined, padding: compact ? 14 : 18, display: "grid", gridTemplateColumns: compact ? "1fr" : videoMode ? "260px minmax(620px, 1fr)" : "250px minmax(520px, 1fr) 330px", gap: 14, overflow: compact ? "auto" : "hidden" }}>
       <aside style={card({ padding: 12, minHeight: 0, overflow: "auto" })}>
         <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 10 }}>集数 / 视频段</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
@@ -1747,26 +1670,30 @@ function ShotWorkbench({
           {segments.length === 0 && <Empty title="还没有分镜。先到“剧本分集”生成分镜设计。" icon={<Clapperboard size={34} />} />}
         </div>
       </aside>
-      <section style={{ minHeight: 0, display: "grid", gridTemplateRows: compact ? "auto auto auto" : "auto 160px 1fr", gap: 12 }}>
+      <section style={{ minHeight: 0, display: "grid", gridTemplateRows: compact ? "auto auto auto" : videoMode ? "auto 150px minmax(0, 1fr)" : "auto 160px 1fr", gap: 12 }}>
         <div style={card({ padding: 14 })}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <div>
-              <h1 style={{ margin: 0, fontSize: 18 }}>视频段 {currentSegment ? `${String(currentSegment.segmentNumber).padStart(2, "0")} · ${currentSegment.duration}s` : "--"}</h1>
-              <div style={{ ...tinyLabel(), marginTop: 5 }}>几个分镜镜头合成一条 15 秒左右 Seedance 2.0 提示词。</div>
+              <h1 style={{ margin: 0, fontSize: 18 }}>{videoMode ? "视频生成" : "分镜设计"} {currentSegment ? `· 视频段 ${String(currentSegment.segmentNumber).padStart(2, "0")}` : ""}</h1>
+              <div style={{ ...tinyLabel(), marginTop: 5 }}>{videoMode ? "固定资产参考 + 15 秒提示词 + Seedance 2.0 多参生成。" : "先补齐每个分镜的草图和人物机位示意图。"}</div>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: compact ? "flex-start" : "flex-end" }}>
               <Button disabled={!segmentStats || segmentStats.nextAction === "done" || generateStoryboard.isPending || generateDiagram.isPending || generateSegmentPrompt.isPending || generateVideoSegment.isPending || generateVideo.isPending} onClick={runNextSegmentAction} style={{ background: C.ink, color: "#fff", borderRadius: 8 }}>
                 {generateStoryboard.isPending || generateDiagram.isPending || generateSegmentPrompt.isPending || generateVideoSegment.isPending || generateVideo.isPending ? <Loader2 className="animate-spin" size={14} /> : <ChevronRight size={14} />}
-                {segmentStats?.nextLabel ?? "下一步"}
+                {primaryActionLabel}
               </Button>
-              <Button variant="outline" disabled={!activeShot || generateStoryboard.isPending} onClick={() => activeShot && generateStoryboard.mutate({ shotId: activeShot.id, imageEngine: "image2", addToAssetLibrary: false })} style={{ borderColor: C.line, borderRadius: 8 }}>
-                {generateStoryboard.isPending ? <Loader2 className="animate-spin" size={14} /> : <ImageIcon size={14} />}
-                分镜草图
-              </Button>
-              <Button variant="outline" disabled={!activeShot || generateDiagram.isPending} onClick={() => activeShot && generateDiagram.mutate({ shotId: activeShot.id, imageEngine: "image2", addToAssetLibrary: false })} style={{ borderColor: C.line, borderRadius: 8 }}>
-                {generateDiagram.isPending ? <Loader2 className="animate-spin" size={14} /> : <Camera size={14} />}
-                机位图
-              </Button>
+              {!videoMode && (
+                <>
+                  <Button variant="outline" disabled={!activeShot || generateStoryboard.isPending} onClick={() => activeShot && generateStoryboard.mutate({ shotId: activeShot.id, imageEngine: "image2", addToAssetLibrary: false })} style={{ borderColor: C.line, borderRadius: 8 }}>
+                    {generateStoryboard.isPending ? <Loader2 className="animate-spin" size={14} /> : <ImageIcon size={14} />}
+                    分镜草图
+                  </Button>
+                  <Button variant="outline" disabled={!activeShot || generateDiagram.isPending} onClick={() => activeShot && generateDiagram.mutate({ shotId: activeShot.id, imageEngine: "image2", addToAssetLibrary: false })} style={{ borderColor: C.line, borderRadius: 8 }}>
+                    {generateDiagram.isPending ? <Loader2 className="animate-spin" size={14} /> : <Camera size={14} />}
+                    机位图
+                  </Button>
+                </>
+              )}
             </div>
           </div>
           {segmentStats && (
@@ -1797,23 +1724,25 @@ function ShotWorkbench({
           ))}
           {!currentSegment && <Empty title="暂无视频段" icon={<GalleryHorizontal size={34} />} />}
         </div>
-        <div style={{ minHeight: 0, display: "grid", gridTemplateColumns: compact ? "1fr" : "1fr 1fr", gap: 12 }}>
-          <section style={card({ padding: 14, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr", gap: 10 })}>
-            <div>
-              <div style={{ fontSize: 15, fontWeight: 900 }}>当前分镜</div>
-              <div style={tinyLabel()}>{focusShot && focusShot.id !== activeShot?.id ? `下一步建议处理分镜 ${focusShot.shotNumber}` : "动作、台词、情绪和表演留白"}</div>
-            </div>
-            {activeShot ? (
-              <div style={{ minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 10 }}>
-                <InfoLine label="场景" value={activeShot.sceneName || "未命名场景"} />
-                <InfoLine label="人物" value={activeShot.characters || "未指定"} />
-                <InfoLine label="台词" value={activeShot.dialogue || "无台词"} />
-                <InfoLine label="情绪" value={activeShot.emotion || "未指定"} />
-                <div style={{ ...tinyLabel(C.text), whiteSpace: "pre-wrap", lineHeight: 1.7, background: C.panelSoft, borderRadius: 8, padding: 12 }}>{activeShot.visualDescription || "暂无镜头描述"}</div>
+        <div style={{ minHeight: 0, display: "grid", gridTemplateColumns: compact || videoMode ? "1fr" : "1fr 1fr", gap: 12 }}>
+          {!videoMode && (
+            <section style={card({ padding: 14, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr", gap: 10 })}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 900 }}>当前分镜</div>
+                <div style={tinyLabel()}>{focusShot && focusShot.id !== activeShot?.id ? `下一步建议处理分镜 ${focusShot.shotNumber}` : "动作、台词、情绪和表演留白"}</div>
               </div>
-            ) : <Empty title="选择一个视频段或分镜" icon={<FileText size={34} />} />}
-          </section>
-          <section style={card({ padding: 0, minHeight: 0, display: "grid", gridTemplateRows: "1fr auto", overflow: "hidden" })}>
+              {activeShot ? (
+                <div style={{ minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 10 }}>
+                  <InfoLine label="场景" value={activeShot.sceneName || "未命名场景"} />
+                  <InfoLine label="人物" value={activeShot.characters || "未指定"} />
+                  <InfoLine label="台词" value={activeShot.dialogue || "无台词"} />
+                  <InfoLine label="情绪" value={activeShot.emotion || "未指定"} />
+                  <div style={{ ...tinyLabel(C.text), whiteSpace: "pre-wrap", lineHeight: 1.7, background: C.panelSoft, borderRadius: 8, padding: 12 }}>{activeShot.visualDescription || "暂无镜头描述"}</div>
+                </div>
+              ) : <Empty title="选择一个视频段或分镜" icon={<FileText size={34} />} />}
+            </section>
+          )}
+          <section style={card({ padding: 0, minHeight: videoMode ? 520 : 0, display: "grid", gridTemplateRows: videoMode ? "minmax(260px, 1fr) auto" : "1fr", overflow: "hidden" })}>
             <div style={{ background: C.panelSoft, display: "grid", placeItems: "center", overflow: "hidden" }}>
               {currentSegment?.videoUrl || segmentLead?.videoUrl ? (
                 <video src={currentSegment?.videoUrl || segmentLead?.videoUrl || ""} controls style={{ width: "100%", height: "100%", objectFit: "contain" }} />
@@ -1826,61 +1755,63 @@ function ShotWorkbench({
                 </div>
               )}
             </div>
-            <SeedanceComposer
-              disabled={!project || !currentSegment}
-              prompt={segmentPrompt}
-              onPrompt={setSegmentPrompt}
-              duration={duration}
-              onDuration={setDuration}
-              tags={referenceTags}
-              availableAssets={imageAssets}
-              selectedAssets={selectedAssets}
-              selectedAssetIds={selectedAssetIds}
-              assetPickerOpen={assetPickerOpen}
-              onAssetPickerOpen={setAssetPickerOpen}
-              onToggleAsset={toggleAsset}
-              onClearAssets={() => setSelectedAssetIds([])}
-              isPrompting={generateSegmentPrompt.isPending}
-              isSaving={updateSegment.isPending}
-              isGenerating={generateVideoSegment.isPending || generateVideo.isPending}
-              onSaveDraft={saveSegmentDraft}
-              onGeneratePrompt={() => {
-                if (!project || !currentSegment) return;
-                generateSegmentPrompt.mutate({
-                  projectId: project.id,
-                  segmentId: typeof currentSegment.id === "number" ? currentSegment.id : undefined,
-                  shotIds: currentSegment.shots.map((shot) => shot.id),
-                  referenceAssetIds: selectedAssetIds,
-                  duration,
-                });
-              }}
-              onGenerateVideo={() => {
-                if (!segmentLead || !currentSegment) return;
-                const aspectRatio = project?.aspectRatio === "landscape" ? "16:9" : "9:16";
-                if (typeof currentSegment.id === "number") {
-                  generateVideoSegment.mutate({
-                    segmentId: currentSegment.id,
-                    prompt: segmentPrompt,
+            {videoMode && (
+              <SeedanceComposer
+                disabled={!project || !currentSegment}
+                prompt={segmentPrompt}
+                onPrompt={setSegmentPrompt}
+                duration={duration}
+                onDuration={setDuration}
+                tags={referenceTags}
+                availableAssets={imageAssets}
+                selectedAssets={selectedAssets}
+                selectedAssetIds={selectedAssetIds}
+                assetPickerOpen={assetPickerOpen}
+                onAssetPickerOpen={setAssetPickerOpen}
+                onToggleAsset={toggleAsset}
+                onClearAssets={() => setSelectedAssetIds([])}
+                isPrompting={generateSegmentPrompt.isPending}
+                isSaving={updateSegment.isPending}
+                isGenerating={generateVideoSegment.isPending || generateVideo.isPending}
+                onSaveDraft={saveSegmentDraft}
+                onGeneratePrompt={() => {
+                  if (!project || !currentSegment) return;
+                  generateSegmentPrompt.mutate({
+                    projectId: project.id,
+                    segmentId: typeof currentSegment.id === "number" ? currentSegment.id : undefined,
+                    shotIds: currentSegment.shots.map((shot) => shot.id),
                     referenceAssetIds: selectedAssetIds,
-                    referenceImageUrls: referenceUrls,
                     duration,
-                    aspectRatio,
                   });
-                } else {
-                  generateVideo.mutate({
-                    shotId: segmentLead.id,
-                    prompt: segmentPrompt,
-                    referenceImageUrls: referenceUrls,
-                    duration,
-                    aspectRatio,
-                  });
-                }
-              }}
-            />
+                }}
+                onGenerateVideo={() => {
+                  if (!segmentLead || !currentSegment) return;
+                  const aspectRatio = project?.aspectRatio === "landscape" ? "16:9" : "9:16";
+                  if (typeof currentSegment.id === "number") {
+                    generateVideoSegment.mutate({
+                      segmentId: currentSegment.id,
+                      prompt: segmentPrompt,
+                      referenceAssetIds: selectedAssetIds,
+                      referenceImageUrls: referenceUrls,
+                      duration,
+                      aspectRatio,
+                    });
+                  } else {
+                    generateVideo.mutate({
+                      shotId: segmentLead.id,
+                      prompt: segmentPrompt,
+                      referenceImageUrls: referenceUrls,
+                      duration,
+                      aspectRatio,
+                    });
+                  }
+                }}
+              />
+            )}
           </section>
         </div>
       </section>
-      <aside style={card({ padding: 14, minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr auto", gap: 12 })}>
+      {!videoMode && <aside style={card({ padding: 14, minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr auto", gap: 12 })}>
         <div>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
             <div style={{ fontSize: 15, fontWeight: 900 }}>资产引用面板</div>
@@ -1920,7 +1851,7 @@ function ShotWorkbench({
             <Plus size={14} /> 机位入库
           </Button>
         </div>
-      </aside>
+      </aside>}
     </div>
   );
 }
@@ -2011,7 +1942,7 @@ function SeedanceComposer({
         value={prompt}
         onChange={(event) => onPrompt(event.target.value)}
         placeholder="描述这个视频段，或生成 15 秒 Seedance 2.0 提示词..."
-        rows={5}
+        rows={8}
         style={{ ...field(), resize: "none", lineHeight: 1.6 }}
       />
       {assetPickerOpen && (

@@ -16,7 +16,7 @@
  *   - generateStoryboardSketchPrompt / generateCameraDiagramPrompt — image2 草图提示词
  */
 import { callLLM } from "./llm-service";
-import { buildVisualStylePrompt, getVisualStylePreset } from "../../shared/visualStyles";
+import { buildVisualStylePrompt, CAMERA_STYLE_PRESETS, getVisualStylePreset, STYLE_ENHANCERS } from "../../shared/visualStyles";
 import { parseLlmJson } from "../lib/llm-json";
 
 // ─── 共用类型 ──────────────────────────────────────────────────────────────────
@@ -94,7 +94,7 @@ ${PROMPT_METHODOLOGY}
 - 不要求用户输入题材、平台、集数、单集时长；你需要从剧本中智能识别。
 - 不改写原剧情，不新增剧本里不存在的关键事件。
 - 输出要可执行，能约束后续生成保持一致。
-- 视觉风格必须结合用户选择的摄影风格预设和增强标签，但允许从剧本内容中补充更具体的光线、材质和表演规则。
+- 视觉风格必须由你从剧本类型、人物关系、场景、情绪和内部摄影风格知识库中综合判断，不要求用户选择固定预设。
 - 表演规则要写出语气、潜台词、停顿和微表情，不要只写“悲伤/紧张/高级”。
 - 连续性规则要明确哪些人物脸、服装、场景、关键道具不能改变。`;
 
@@ -375,11 +375,25 @@ function resolveVisualStyle(context?: ProjectPromptContext) {
   return context?.visualStylePrompt?.trim() || buildVisualStylePrompt(preset, context?.styleEnhancers ?? []);
 }
 
+function visualStyleKnowledgeBase() {
+  const presets = CAMERA_STYLE_PRESETS.map((preset) => [
+    `- ${preset.name}`,
+    `  摄影机质感：${preset.cameraSystem}`,
+    `  光影方式：${preset.lighting}`,
+    `  空气介质：${preset.atmosphere}`,
+    `  曝光与反差：${preset.exposureContrast}`,
+    `  拍摄手法：${preset.shootingMethod}`,
+    `  表演规则：${preset.performance}`,
+    `  禁忌：${preset.avoid}`,
+  ].join("\n")).join("\n");
+  const enhancers = STYLE_ENHANCERS.map((item) => `- ${item.label}：${item.prompt}`).join("\n");
+  return `内部摄影风格知识库（仅供分析调用，不要逐字照搬，不要让用户选择）：\n${presets}\n\n可调用增强标签：\n${enhancers}`;
+}
+
 export async function generateProjectBible(
   script: string,
   context: ProjectPromptContext
 ): Promise<ProjectBible> {
-  const visualStyle = resolveVisualStyle(context);
   const response = await callLLM({
     systemPrompt: PROJECT_BIBLE_SYSTEM_PROMPT,
     prompt: `项目定义：
@@ -387,8 +401,13 @@ ${context.projectDefinition || "用户未填写，需从剧本中识别。"}
 
 画幅：${context.aspectRatio || "9:16"}
 
-视觉风格锁定词：
-${visualStyle}
+${visualStyleKnowledgeBase()}
+
+任务：
+请先从剧本类型、人物关系、核心情绪、主要场景和平台观感判断本项目适合的摄影/光影/节奏/表演方案。
+视觉风格不是让用户选择的固定预设，而是你基于内部知识库综合生成的项目级制作方案。
+visualRules 必须可直接影响后续分镜草图、机位图和 Seedance 2.0 提示词，包含光影方式、空气介质、曝光反差、摄影机质感、拍摄手法、表演留白、禁忌。
+不要输出“选择了某某预设”，只输出融合后的导演判断。
 
 剧本：
 ${script.slice(0, 80000)}
@@ -635,10 +654,10 @@ ${shot.emotion ? `情绪：${shot.emotion}` : ""}
 项目定义：
 ${context.projectDefinition || "未提供"}
 
-项目圣经：
+项目圣经 / AI制作方案：
 ${context.projectBible || "未生成，请仅基于镜头和风格保持一致"}
 
-视觉风格锁定词：
+AI生成视觉风格规则：
 ${visualStyle}
 
 可用参考图：
