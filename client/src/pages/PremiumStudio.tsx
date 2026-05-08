@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { trpc } from "@/lib/trpc";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -255,6 +255,20 @@ function copy(text?: string | null) {
   toast.success("已复制");
 }
 
+function useViewportWidth() {
+  const [width, setWidth] = useState(() => (typeof window === "undefined" ? 1440 : window.innerWidth));
+  useEffect(() => {
+    const onResize = () => setWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return width;
+}
+
+function useCompactLayout(breakpoint = 980) {
+  return useViewportWidth() < breakpoint;
+}
+
 function buildSegments(shots: Shot[]): VideoSegment[] {
   const byEpisode = new Map<number, Shot[]>();
   for (const shot of shots) {
@@ -360,12 +374,14 @@ function LoadingScreen() {
 }
 
 function StudioShell() {
+  const compact = useCompactLayout();
   const [activeProjectId, setActiveProjectId] = useState<number | null>(null);
   const [module, setModule] = useState<ModuleKey>("overview");
   const [scriptText, setScriptText] = useState("");
   const [episodes, setEpisodes] = useState<SplitEpisode[]>([]);
   const [activeEpisode, setActiveEpisode] = useState(1);
   const [activeSegmentId, setActiveSegmentId] = useState<string | number | null>(null);
+  const openShots = useCallback(() => setModule("shots"), []);
 
   const projectsQuery = trpc.overseas.listProjects.useQuery(undefined, { refetchOnWindowFocus: false });
   const projectQuery = trpc.overseas.getProject.useQuery(
@@ -391,11 +407,12 @@ function StudioShell() {
     : "固定资产参考驱动的 Seedance 2.0 精品剧工作台";
 
   return (
-    <div style={{ minHeight: "100vh", background: C.app, color: C.text, display: "grid", gridTemplateColumns: "280px 1fr" }}>
+    <div style={{ minHeight: "100vh", background: C.app, color: C.text, display: "grid", gridTemplateColumns: compact ? "1fr" : "280px 1fr", gridTemplateRows: compact ? "auto minmax(0, 1fr)" : undefined }}>
       <Sidebar
         projects={projects}
         activeProjectId={activeProjectId}
         activeModule={module}
+        compact={compact}
         onProject={(id) => setActiveProjectId(id)}
         onNew={() => {
           setActiveProjectId(null);
@@ -403,8 +420,8 @@ function StudioShell() {
         }}
         onModule={setModule}
       />
-      <main style={{ minWidth: 0, display: "grid", gridTemplateRows: "64px 1fr" }}>
-        <header style={{ background: C.panel, borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 24px" }}>
+      <main style={{ minWidth: 0, display: "grid", gridTemplateRows: compact ? "auto minmax(0, 1fr)" : "64px 1fr" }}>
+        <header style={{ background: C.panel, borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, padding: compact ? "12px 14px" : "0 24px", flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: 15, fontWeight: 900 }}>{project?.name ?? "新项目"}</div>
             <div style={{ ...tinyLabel(), marginTop: 3 }}>{subtitle}</div>
@@ -449,6 +466,7 @@ function StudioShell() {
               onEpisodes={setEpisodes}
               onActiveEpisode={setActiveEpisode}
               onChanged={() => projectQuery.refetch()}
+              onOpenShots={openShots}
             />
           )}
           {module === "rules" && <DirectorRulesView project={project} scriptText={scriptText} onSaved={() => projectQuery.refetch()} />}
@@ -475,6 +493,7 @@ function Sidebar({
   projects,
   activeProjectId,
   activeModule,
+  compact,
   onProject,
   onNew,
   onModule,
@@ -482,12 +501,13 @@ function Sidebar({
   projects: Project[];
   activeProjectId: number | null;
   activeModule: ModuleKey;
+  compact: boolean;
   onProject: (id: number) => void;
   onNew: () => void;
   onModule: (module: ModuleKey) => void;
 }) {
   return (
-    <aside style={{ background: C.side, borderRight: `1px solid ${C.line}`, padding: 16, display: "grid", gridTemplateRows: "auto auto 1fr", gap: 18, minHeight: 0 }}>
+    <aside style={{ background: C.side, borderRight: compact ? "none" : `1px solid ${C.line}`, borderBottom: compact ? `1px solid ${C.line}` : "none", padding: compact ? 10 : 16, display: "grid", gridTemplateRows: compact ? "auto auto" : "auto auto 1fr", gap: compact ? 10 : 18, minHeight: 0 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 9, fontWeight: 900 }}>
           <Clapperboard size={22} style={{ color: C.ink }} />
@@ -497,13 +517,13 @@ function Sidebar({
           <Plus size={14} />
         </Button>
       </div>
-      <nav style={{ display: "grid", gap: 6 }}>
+      <nav style={{ display: compact ? "flex" : "grid", gap: 6, overflowX: compact ? "auto" : undefined, paddingBottom: compact ? 2 : undefined }}>
         {navItems.map((item) => (
           <button
             key={item.key}
             onClick={() => onModule(item.key)}
             style={{
-              height: 38,
+              height: compact ? 36 : 38,
               border: `1px solid ${activeModule === item.key ? "#d8ccff" : "transparent"}`,
               background: activeModule === item.key ? C.purpleSoft : "transparent",
               color: activeModule === item.key ? C.purple : C.text,
@@ -515,6 +535,7 @@ function Sidebar({
               cursor: "pointer",
               fontWeight: 800,
               fontSize: 13,
+              flex: compact ? "0 0 auto" : undefined,
             }}
           >
             {item.icon}
@@ -522,7 +543,7 @@ function Sidebar({
           </button>
         ))}
       </nav>
-      <section style={{ minHeight: 0, overflow: "auto" }}>
+      {!compact && <section style={{ minHeight: 0, overflow: "auto" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
           <div style={{ ...tinyLabel(C.dim), fontWeight: 800 }}>项目列表</div>
           <span style={tinyLabel(C.dim)}>{projects.length}</span>
@@ -549,7 +570,7 @@ function Sidebar({
           ))}
           {projects.length === 0 && <div style={{ ...tinyLabel(C.dim), lineHeight: 1.7 }}>还没有项目。点击上方 + 创建第一个精品剧。</div>}
         </div>
-      </section>
+      </section>}
     </aside>
   );
 }
@@ -565,6 +586,7 @@ function OverviewView({
   videoSegmentCount: number;
   onModule: (module: ModuleKey) => void;
 }) {
+  const compact = useCompactLayout();
   const { data: assetData = [] } = trpc.overseas.listAssets.useQuery(
     { projectId: project?.id ?? 0 },
     { enabled: Boolean(project?.id), refetchOnWindowFocus: false }
@@ -632,8 +654,8 @@ function OverviewView({
   ].filter((item): item is string => Boolean(item));
 
   return (
-    <div style={{ height: "calc(100vh - 64px)", padding: 22, display: "grid", gridTemplateRows: "auto 1fr", gap: 16, overflow: "hidden" }}>
-      <section style={card({ padding: 20, display: "grid", gridTemplateColumns: "1fr auto", alignItems: "center", gap: 18 })}>
+    <div style={{ height: compact ? "auto" : "calc(100vh - 64px)", minHeight: compact ? "calc(100vh - 136px)" : undefined, padding: compact ? 14 : 22, display: "grid", gridTemplateRows: "auto 1fr", gap: 16, overflow: compact ? "auto" : "hidden" }}>
+      <section style={card({ padding: compact ? 16 : 20, display: "grid", gridTemplateColumns: compact ? "1fr" : "1fr auto", alignItems: "center", gap: 18 })}>
         <div>
           <div style={{ ...tinyLabel(C.gold), fontWeight: 900, marginBottom: 8 }}>AI 影片生产总览</div>
           <h1 style={{ margin: 0, fontSize: 24 }}>{project?.name ?? "创建一个精品剧项目"}</h1>
@@ -647,9 +669,9 @@ function OverviewView({
         </Button>
       </section>
 
-      <section style={{ minHeight: 0, display: "grid", gridTemplateColumns: "minmax(0, 1fr) 340px", gap: 16, overflow: "hidden" }}>
+      <section style={{ minHeight: 0, display: "grid", gridTemplateColumns: compact ? "1fr" : "minmax(0, 1fr) 340px", gap: 16, overflow: compact ? "visible" : "hidden" }}>
         <div style={card({ padding: 18, minHeight: 0, overflow: "auto" })}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(130px, 1fr))", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: compact ? "repeat(auto-fit, minmax(150px, 1fr))" : "repeat(5, minmax(130px, 1fr))", gap: 10 }}>
             {stages.map((stage, index) => (
               <button
                 key={stage.module}
@@ -677,7 +699,7 @@ function OverviewView({
             ))}
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 10, marginTop: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: compact ? "repeat(2, minmax(0, 1fr))" : "repeat(4, 1fr)", gap: 10, marginTop: 16 }}>
             <Metric label="分镜草图" value={`${storyboardReady}/${shots.length || 0}`} />
             <Metric label="机位示意" value={`${cameraReady}/${shots.length || 0}`} />
             <Metric label="15秒提示词" value={`${promptReady}/${videoSegmentCount || 0}`} />
@@ -745,6 +767,7 @@ function DefinitionView({
   onCreated: (id: number) => void;
   onSaved: () => void;
 }) {
+  const compact = useCompactLayout();
   const [name, setName] = useState(project?.name ?? "");
   const [definition, setDefinition] = useState(project?.definition ?? "");
   const [aspectRatio, setAspectRatio] = useState<Project["aspectRatio"]>(project?.aspectRatio ?? "portrait");
@@ -798,17 +821,20 @@ function DefinitionView({
       projectType: "premium" as const,
     };
     if (project) updateProject.mutate({ id: project.id, ...payload });
-    else createProject.mutate(payload);
+    else createProject.mutate({
+      ...payload,
+      projectBible: defaultDirectorRules({ name: name.trim(), visualStylePreset: preset.id }),
+    });
   };
 
   return (
-    <div style={{ height: "calc(100vh - 64px)", padding: 22, display: "grid", gridTemplateColumns: "minmax(520px, 1fr) 320px", gap: 18, overflow: "hidden" }}>
+    <div style={{ height: compact ? "auto" : "calc(100vh - 64px)", minHeight: compact ? "calc(100vh - 136px)" : undefined, padding: compact ? 14 : 22, display: "grid", gridTemplateColumns: compact ? "1fr" : "minmax(520px, 1fr) 320px", gap: 18, overflow: compact ? "auto" : "hidden" }}>
       <section style={card({ padding: 18, display: "grid", gridTemplateRows: "auto auto 1fr auto", gap: 14, minHeight: 0 })}>
         <div>
           <h1 style={{ margin: 0, fontSize: 20 }}>项目定义</h1>
           <div style={{ ...tinyLabel(), marginTop: 6 }}>只保留项目名、画幅、剧本和摄影风格，不再让用户填写集数和时长。</div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 170px 220px", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: compact ? "1fr" : "1fr 170px 220px", gap: 10 }}>
           <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="项目名称" style={field()} />
           <Select value={aspectRatio} onValueChange={(value) => setAspectRatio(value as Project["aspectRatio"])}>
             <SelectTrigger style={field()}><SelectValue /></SelectTrigger>
@@ -824,7 +850,7 @@ function DefinitionView({
             </SelectContent>
           </Select>
         </div>
-        <div style={{ display: "grid", gridTemplateRows: "120px 1fr", gap: 10, minHeight: 0 }}>
+        <div style={{ display: "grid", gridTemplateRows: compact ? "120px minmax(260px, 1fr)" : "120px 1fr", gap: 10, minHeight: 0 }}>
           <Textarea value={definition} onChange={(event) => setDefinition(event.target.value)} placeholder="项目一句话设定、核心人物关系、必须保留或禁止的内容" style={{ ...field(), resize: "none", lineHeight: 1.7 }} />
           <Textarea value={scriptText} onChange={(event) => onScriptText(event.target.value)} placeholder="粘贴完整剧本，或者先创建项目后到“剧本分集”页继续粘贴。" style={{ ...field(), resize: "none", minHeight: 0, lineHeight: 1.75 }} />
         </div>
@@ -882,6 +908,7 @@ function ScriptSplitView({
   onEpisodes,
   onActiveEpisode,
   onChanged,
+  onOpenShots,
 }: {
   project?: Project;
   scriptText: string;
@@ -891,7 +918,9 @@ function ScriptSplitView({
   onEpisodes: (episodes: SplitEpisode[]) => void;
   onActiveEpisode: (episode: number) => void;
   onChanged: () => void;
+  onOpenShots: () => void;
 }) {
+  const compact = useCompactLayout();
   const utils = trpc.useUtils();
   const [jobId, setJobId] = useState<number | null>(null);
   const [quickStartPending, setQuickStartPending] = useState(false);
@@ -922,12 +951,15 @@ function ScriptSplitView({
 
   useEffect(() => {
     if (!project || !job || job.status !== "done") return;
-    toast.success(`分镜设计完成：${job.succeeded}/${job.total}`);
-    setJobId(null);
-    utils.overseas.getProject.invalidate({ id: project.id });
-    utils.overseas.listShots.invalidate();
-    onChanged();
-  }, [job, onChanged, project, utils]);
+    void (async () => {
+      toast.success(`分镜设计完成：${job.succeeded}/${job.total}`);
+      setJobId(null);
+      await utils.overseas.getProject.invalidate({ id: project.id });
+      await utils.overseas.listShots.invalidate();
+      onChanged();
+      onOpenShots();
+    })();
+  }, [job, onChanged, onOpenShots, project, utils]);
 
   const startStoryboard = () => {
     if (!project) {
@@ -978,7 +1010,7 @@ function ScriptSplitView({
   };
 
   return (
-    <div style={{ height: "calc(100vh - 64px)", padding: 22, display: "grid", gridTemplateColumns: "minmax(380px, 0.9fr) minmax(360px, 0.8fr) 360px", gap: 16, overflow: "hidden" }}>
+    <div style={{ height: compact ? "auto" : "calc(100vh - 64px)", minHeight: compact ? "calc(100vh - 136px)" : undefined, padding: compact ? 14 : 22, display: "grid", gridTemplateColumns: compact ? "1fr" : "minmax(380px, 0.9fr) minmax(360px, 0.8fr) 360px", gap: 16, overflow: compact ? "auto" : "hidden" }}>
       <section style={card({ padding: 16, display: "grid", gridTemplateRows: "auto 1fr auto", gap: 12, minHeight: 0 })}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div>
@@ -1047,7 +1079,7 @@ function ScriptSplitView({
   );
 }
 
-function defaultDirectorRules(project?: Project) {
+function defaultDirectorRules(project?: Pick<Project, "name" | "visualStylePreset">) {
   const styleName = project ? getVisualStylePreset(project.visualStylePreset).name : "当前摄影风格";
   return [
     `导演规则：${project?.name ?? "未命名项目"}`,
@@ -1073,6 +1105,7 @@ function defaultDirectorRules(project?: Project) {
 }
 
 function DirectorRulesView({ project, scriptText, onSaved }: { project?: Project; scriptText: string; onSaved: () => void }) {
+  const compact = useCompactLayout();
   const utils = trpc.useUtils();
   const [rules, setRules] = useState(project?.projectBible ?? "");
   useEffect(() => setRules(project?.projectBible ?? ""), [project?.id, project?.projectBible]);
@@ -1115,13 +1148,13 @@ function DirectorRulesView({ project, scriptText, onSaved }: { project?: Project
   ];
 
   return (
-    <div style={{ height: "calc(100vh - 64px)", padding: 22, display: "grid", gridTemplateColumns: "1fr 340px", gap: 16, overflow: "hidden" }}>
+    <div style={{ height: compact ? "auto" : "calc(100vh - 64px)", minHeight: compact ? "calc(100vh - 136px)" : undefined, padding: compact ? 14 : 22, display: "grid", gridTemplateColumns: compact ? "1fr" : "1fr 340px", gap: 16, overflow: compact ? "auto" : "hidden" }}>
       <section style={card({ padding: 18, minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr auto", gap: 14 })}>
         <div>
           <h1 style={{ margin: 0, fontSize: 20 }}>导演规则</h1>
           <div style={{ ...tinyLabel(), marginTop: 6 }}>服务于拆镜头、表演留白、节奏判断和 Seedance 提示词，不负责人物/场景外观一致性。</div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: compact ? "repeat(auto-fit, minmax(130px, 1fr))" : "repeat(5, 1fr)", gap: 8 }}>
           {sections.map(([title, desc]) => (
             <div key={title} style={card({ padding: 12, background: C.panelSoft })}>
               <div style={{ fontSize: 13, fontWeight: 900 }}>{title}</div>
@@ -1161,6 +1194,7 @@ function DirectorRulesView({ project, scriptText, onSaved }: { project?: Project
 }
 
 function AssetsView({ project }: { project?: Project }) {
+  const compact = useCompactLayout();
   const utils = trpc.useUtils();
   const [category, setCategory] = useState<AssetType | "all">("all");
   const [query, setQuery] = useState("");
@@ -1223,7 +1257,7 @@ function AssetsView({ project }: { project?: Project }) {
   };
 
   return (
-    <div style={{ height: "calc(100vh - 64px)", padding: 22, display: "grid", gridTemplateColumns: "190px 1fr 360px", gap: 16, overflow: "hidden" }}>
+    <div style={{ height: compact ? "auto" : "calc(100vh - 64px)", minHeight: compact ? "calc(100vh - 136px)" : undefined, padding: compact ? 14 : 22, display: "grid", gridTemplateColumns: compact ? "1fr" : "190px 1fr 360px", gap: 16, overflow: compact ? "auto" : "hidden" }}>
       <aside style={card({ padding: 12, display: "grid", gridTemplateRows: "auto 1fr auto", gap: 12, minHeight: 0 })}>
         <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索资产" style={field()} />
         <div style={{ display: "grid", gap: 6, alignContent: "start" }}>
@@ -1338,6 +1372,7 @@ function ShotWorkbench({
   onActiveSegment: (id: string | number) => void;
   onChanged: () => void;
 }) {
+  const compact = useCompactLayout(1180);
   const utils = trpc.useUtils();
   const fallbackSegments = useMemo(() => buildSegments(shots), [shots]);
   const { data: segmentData = [] } = trpc.overseas.listVideoSegments.useQuery(
@@ -1496,7 +1531,7 @@ function ShotWorkbench({
   };
 
   return (
-    <div style={{ height: "calc(100vh - 64px)", padding: 18, display: "grid", gridTemplateColumns: "250px minmax(520px, 1fr) 330px", gap: 14, overflow: "hidden" }}>
+    <div style={{ height: compact ? "auto" : "calc(100vh - 64px)", minHeight: compact ? "calc(100vh - 136px)" : undefined, padding: compact ? 14 : 18, display: "grid", gridTemplateColumns: compact ? "1fr" : "250px minmax(520px, 1fr) 330px", gap: 14, overflow: compact ? "auto" : "hidden" }}>
       <aside style={card({ padding: 12, minHeight: 0, overflow: "auto" })}>
         <div style={{ fontSize: 15, fontWeight: 900, marginBottom: 10 }}>集数 / 视频段</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
@@ -1548,14 +1583,14 @@ function ShotWorkbench({
           {segments.length === 0 && <Empty title="还没有分镜。先到“剧本分集”生成分镜设计。" icon={<Clapperboard size={34} />} />}
         </div>
       </aside>
-      <section style={{ minHeight: 0, display: "grid", gridTemplateRows: "auto 160px 1fr", gap: 12 }}>
+      <section style={{ minHeight: 0, display: "grid", gridTemplateRows: compact ? "auto auto auto" : "auto 160px 1fr", gap: 12 }}>
         <div style={card({ padding: 14 })}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <div>
               <h1 style={{ margin: 0, fontSize: 18 }}>视频段 {currentSegment ? `${String(currentSegment.segmentNumber).padStart(2, "0")} · ${currentSegment.duration}s` : "--"}</h1>
               <div style={{ ...tinyLabel(), marginTop: 5 }}>几个分镜镜头合成一条 15 秒左右 Seedance 2.0 提示词。</div>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: compact ? "flex-start" : "flex-end" }}>
               <Button disabled={!segmentStats || segmentStats.nextAction === "done" || generateStoryboard.isPending || generateDiagram.isPending || generateSegmentPrompt.isPending || generateVideoSegment.isPending || generateVideo.isPending} onClick={runNextSegmentAction} style={{ background: C.ink, color: "#fff", borderRadius: 8 }}>
                 {generateStoryboard.isPending || generateDiagram.isPending || generateSegmentPrompt.isPending || generateVideoSegment.isPending || generateVideo.isPending ? <Loader2 className="animate-spin" size={14} /> : <ChevronRight size={14} />}
                 {segmentStats?.nextLabel ?? "下一步"}
@@ -1571,7 +1606,7 @@ function ShotWorkbench({
             </div>
           </div>
           {segmentStats && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(92px, 1fr))", gap: 8, marginTop: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: compact ? "repeat(auto-fit, minmax(110px, 1fr))" : "repeat(5, minmax(92px, 1fr))", gap: 8, marginTop: 12 }}>
               <SegmentStat label="分镜" value={`${segmentStats.shots} 个`} done />
               <SegmentStat label="参考图" value={`${segmentStats.references}/9`} done={segmentStats.references > 0} />
               <SegmentStat label="草图" value={`${segmentStats.storyboards}/${segmentStats.shots}`} done={segmentStats.storyboards === segmentStats.shots} />
@@ -1598,7 +1633,7 @@ function ShotWorkbench({
           ))}
           {!currentSegment && <Empty title="暂无视频段" icon={<GalleryHorizontal size={34} />} />}
         </div>
-        <div style={{ minHeight: 0, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <div style={{ minHeight: 0, display: "grid", gridTemplateColumns: compact ? "1fr" : "1fr 1fr", gap: 12 }}>
           <section style={card({ padding: 14, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr", gap: 10 })}>
             <div>
               <div style={{ fontSize: 15, fontWeight: 900 }}>当前分镜</div>
@@ -1760,6 +1795,7 @@ function SeedanceComposer({
   onGeneratePrompt: () => void;
   onGenerateVideo: () => void;
 }) {
+  const compact = useCompactLayout(720);
   const [assetFilter, setAssetFilter] = useState<AssetType | "all">("all");
   const filteredAssets = availableAssets.filter((asset) => assetFilter === "all" || asset.type === assetFilter);
 
@@ -1852,7 +1888,7 @@ function SeedanceComposer({
           </div>
         </div>
       )}
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
         <button style={pill()}><Plus size={13} /></button>
         <button style={pill(true)}><Film size={13} /> 视频 2.0</button>
         <button style={pill(true)}><Sparkles size={13} /> Seedance 2.0</button>
@@ -1865,11 +1901,11 @@ function SeedanceComposer({
             {[8, 10, 12, 15].map((value) => <SelectItem key={value} value={String(value)}>{value}s</SelectItem>)}
           </SelectContent>
         </Select>
-        <Button variant="outline" disabled={disabled || isPrompting} onClick={onGeneratePrompt} style={{ borderColor: C.line, borderRadius: 999, height: 32 }}>
+        <Button variant="outline" disabled={disabled || isPrompting} onClick={onGeneratePrompt} style={{ borderColor: C.line, borderRadius: 999, height: 32, flex: compact ? "1 1 160px" : undefined }}>
           {isPrompting ? <Loader2 className="animate-spin" size={14} /> : <Wand2 size={14} />}
           生成15秒提示词
         </Button>
-        <Button disabled={disabled || !prompt.trim() || isGenerating} onClick={onGenerateVideo} style={{ background: C.ink, color: "#fff", borderRadius: 999, height: 34, marginLeft: "auto" }}>
+        <Button disabled={disabled || !prompt.trim() || isGenerating} onClick={onGenerateVideo} style={{ background: C.ink, color: "#fff", borderRadius: 999, height: 34, marginLeft: compact ? 0 : "auto", flex: compact ? "1 1 120px" : undefined }}>
           {isGenerating ? <Loader2 className="animate-spin" size={14} /> : <ArrowUp size={14} />}
           生成
         </Button>
@@ -1916,6 +1952,7 @@ function SegmentStat({ label, value, done }: { label: string; value: string; don
 }
 
 function GenerationRecordsView({ project, shots }: { project?: Project; shots: Shot[] }) {
+  const compact = useCompactLayout();
   const { data: segmentData = [] } = trpc.overseas.listVideoSegments.useQuery(
     { projectId: project?.id ?? 0 },
     { enabled: Boolean(project?.id && shots.length > 0), refetchOnWindowFocus: false }
@@ -1945,7 +1982,7 @@ function GenerationRecordsView({ project, shots }: { project?: Project; shots: S
   };
 
   return (
-    <div style={{ height: "calc(100vh - 64px)", padding: 22, display: "grid", gridTemplateColumns: "1fr 340px", gap: 16, overflow: "hidden" }}>
+    <div style={{ height: compact ? "auto" : "calc(100vh - 64px)", minHeight: compact ? "calc(100vh - 136px)" : undefined, padding: compact ? 14 : 22, display: "grid", gridTemplateColumns: compact ? "1fr" : "1fr 340px", gap: 16, overflow: compact ? "auto" : "hidden" }}>
       <section style={card({ padding: 18, minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr", gap: 14 })}>
         <div>
           <h1 style={{ margin: 0, fontSize: 20 }}>生成记录</h1>
@@ -1962,7 +1999,7 @@ function GenerationRecordsView({ project, shots }: { project?: Project; shots: S
         </div>
         <div style={{ minHeight: 0, overflow: "auto", display: "grid", gap: 10, alignContent: "start" }}>
           {records.map((record) => (
-            <div key={record.id} style={card({ padding: 12, display: "grid", gridTemplateColumns: "140px 1fr 86px 176px", alignItems: "center", gap: 12, borderColor: record.status === "失败" ? "#f1c7c0" : C.line, background: record.status === "失败" ? "#fff7f5" : C.panel })}>
+            <div key={record.id} style={card({ padding: 12, display: "grid", gridTemplateColumns: compact ? "1fr" : "140px 1fr 86px 176px", alignItems: "center", gap: 12, borderColor: record.status === "失败" ? "#f1c7c0" : C.line, background: record.status === "失败" ? "#fff7f5" : C.panel })}>
               <div>
                 <strong style={{ fontSize: 13 }}>{record.type}</strong>
                 <div style={{ ...tinyLabel(C.dim), marginTop: 4 }}>{record.scope}</div>
