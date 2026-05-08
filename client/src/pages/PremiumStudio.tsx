@@ -307,6 +307,14 @@ function buildSegments(shots: Shot[]): VideoSegment[] {
   return segments;
 }
 
+function renumberEpisodes(list: SplitEpisode[]) {
+  return list.map((episode, index) => ({
+    ...episode,
+    episodeNumber: index + 1,
+    title: episode.title.trim() || `第 ${index + 1} 集`,
+  }));
+}
+
 export default function PremiumStudio() {
   return (
     <InternalGate>
@@ -1008,6 +1016,54 @@ function ScriptSplitView({
       setQuickStartPending(false);
     }
   };
+  const selectedIndex = selectedEpisode ? episodes.findIndex((episode) => episode.episodeNumber === selectedEpisode.episodeNumber) : -1;
+  const updateSelectedEpisode = (patch: Partial<Pick<SplitEpisode, "title" | "scriptText">>) => {
+    if (!selectedEpisode) return;
+    onEpisodes(episodes.map((episode) => (
+      episode.episodeNumber === selectedEpisode.episodeNumber ? { ...episode, ...patch } : episode
+    )));
+  };
+  const mergeNextEpisode = () => {
+    if (selectedIndex < 0 || selectedIndex >= episodes.length - 1) return toast.info("当前集后面没有可合并内容");
+    const current = episodes[selectedIndex];
+    const next = episodes[selectedIndex + 1];
+    const merged = [
+      ...episodes.slice(0, selectedIndex),
+      {
+        ...current,
+        title: `${current.title} / ${next.title}`.slice(0, 80),
+        scriptText: `${current.scriptText.trim()}\n\n${next.scriptText.trim()}`.trim(),
+      },
+      ...episodes.slice(selectedIndex + 2),
+    ];
+    onEpisodes(renumberEpisodes(merged));
+    onActiveEpisode(selectedIndex + 1);
+    toast.success("已合并下一集");
+  };
+  const insertEpisodeAfter = () => {
+    const insertAt = selectedIndex >= 0 ? selectedIndex + 1 : episodes.length;
+    const next = renumberEpisodes([
+      ...episodes.slice(0, insertAt),
+      { episodeNumber: insertAt + 1, title: "新分集", scriptText: "" },
+      ...episodes.slice(insertAt),
+    ]);
+    onEpisodes(next);
+    onActiveEpisode(insertAt + 1);
+    toast.success("已插入新分集");
+  };
+  const deleteSelectedEpisode = () => {
+    if (!selectedEpisode) return;
+    if (episodes.length <= 1) {
+      onEpisodes([]);
+      onActiveEpisode(1);
+      toast.success("已清空分集");
+      return;
+    }
+    const next = renumberEpisodes(episodes.filter((episode) => episode.episodeNumber !== selectedEpisode.episodeNumber));
+    onEpisodes(next);
+    onActiveEpisode(Math.min(selectedEpisode.episodeNumber, next.length));
+    toast.success("已删除当前集");
+  };
 
   return (
     <div style={{ height: compact ? "auto" : "calc(100vh - 64px)", minHeight: compact ? "calc(100vh - 136px)" : undefined, padding: compact ? 14 : 22, display: "grid", gridTemplateColumns: compact ? "1fr" : "minmax(380px, 0.9fr) minmax(360px, 0.8fr) 360px", gap: 16, overflow: compact ? "auto" : "hidden" }}>
@@ -1056,7 +1112,7 @@ function ScriptSplitView({
             >
               <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
                 <strong style={{ fontSize: 13 }}>第 {episode.episodeNumber} 集 · {episode.title}</strong>
-                <span style={tinyLabel(activeEpisode === episode.episodeNumber ? C.purple : C.dim)}>待审核</span>
+                <span style={tinyLabel(activeEpisode === episode.episodeNumber ? C.purple : C.dim)}>可编辑</span>
               </div>
               <div style={{ ...tinyLabel(), marginTop: 8, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{episode.scriptText}</div>
             </button>
@@ -1066,13 +1122,23 @@ function ScriptSplitView({
       </section>
       <section style={card({ padding: 16, minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr auto", gap: 10 })}>
         <h2 style={{ margin: 0, fontSize: 17 }}>当前集详情</h2>
-        <Input value={selectedEpisode?.title ?? ""} readOnly placeholder="集标题" style={field()} />
-        <Textarea value={selectedEpisode?.scriptText ?? ""} readOnly placeholder="当前集完整文本" style={{ ...field(), resize: "none", lineHeight: 1.65, minHeight: 0 }} />
+        <Input
+          value={selectedEpisode?.title ?? ""}
+          onChange={(event) => updateSelectedEpisode({ title: event.target.value })}
+          placeholder="集标题"
+          style={field()}
+        />
+        <Textarea
+          value={selectedEpisode?.scriptText ?? ""}
+          onChange={(event) => updateSelectedEpisode({ scriptText: event.target.value })}
+          placeholder="当前集完整文本，可在生成分镜前调整。"
+          style={{ ...field(), resize: "none", lineHeight: 1.65, minHeight: 0 }}
+        />
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <Button variant="outline" style={{ borderColor: C.line, borderRadius: 8 }} disabled>合并</Button>
-          <Button variant="outline" style={{ borderColor: C.line, borderRadius: 8 }} disabled>拆分</Button>
-          <Button variant="outline" style={{ borderColor: C.line, borderRadius: 8 }} disabled>锁定</Button>
-          <Button variant="outline" style={{ borderColor: C.line, borderRadius: 8 }} disabled>改标题</Button>
+          <Button variant="outline" disabled={!selectedEpisode || selectedIndex >= episodes.length - 1} onClick={mergeNextEpisode} style={{ borderColor: C.line, borderRadius: 8 }}>合并下一集</Button>
+          <Button variant="outline" disabled={!project} onClick={insertEpisodeAfter} style={{ borderColor: C.line, borderRadius: 8 }}>插入新集</Button>
+          <Button variant="outline" disabled={!selectedEpisode} onClick={() => copy(selectedEpisode?.scriptText)} style={{ borderColor: C.line, borderRadius: 8 }}>复制正文</Button>
+          <Button variant="outline" disabled={!selectedEpisode} onClick={deleteSelectedEpisode} style={{ borderColor: C.line, borderRadius: 8, color: C.red }}>删除当前</Button>
         </div>
       </section>
     </div>
