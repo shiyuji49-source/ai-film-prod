@@ -2128,6 +2128,7 @@ function SegmentStat({ label, value, done }: { label: string; value: string; don
 
 function GenerationRecordsView({ project, shots }: { project?: Project; shots: Shot[] }) {
   const compact = useCompactLayout();
+  const [filter, setFilter] = useState<"all" | "prompt" | "video" | "visual" | "failed">("all");
   const { data: segmentData = [] } = trpc.overseas.listVideoSegments.useQuery(
     { projectId: project?.id ?? 0 },
     { enabled: Boolean(project?.id && shots.length > 0), refetchOnWindowFocus: false }
@@ -2148,6 +2149,13 @@ function GenerationRecordsView({ project, shots }: { project?: Project; shots: S
     ].filter(Boolean);
   }) as Array<RecordItem>;
   const records = [...segmentRecords, ...shotRecords];
+  const filteredRecords = records.filter((record) => {
+    if (filter === "failed") return record.status === "失败";
+    if (filter === "prompt") return record.type === "15秒提示词";
+    if (filter === "video") return record.type === "Seedance视频";
+    if (filter === "visual") return record.type === "分镜草图" || record.type === "机位图";
+    return true;
+  });
   const counts = {
     total: records.length,
     prompts: records.filter((record) => record.type === "15秒提示词").length,
@@ -2155,25 +2163,32 @@ function GenerationRecordsView({ project, shots }: { project?: Project; shots: S
     failed: records.filter((record) => record.status === "失败").length,
     visuals: records.filter((record) => record.type === "分镜草图" || record.type === "机位图").length,
   };
+  const filterItems: Array<{ key: typeof filter; label: string; count: number }> = [
+    { key: "all", label: "全部", count: counts.total },
+    { key: "failed", label: "失败", count: counts.failed },
+    { key: "video", label: "视频", count: counts.videos },
+    { key: "prompt", label: "提示词", count: counts.prompts },
+    { key: "visual", label: "视觉图", count: counts.visuals },
+  ];
+  const firstFailed = records.find((record) => record.status === "失败");
+  const latestVideo = records.find((record) => record.type === "Seedance视频");
 
   return (
     <div style={{ height: compact ? "auto" : "calc(100vh - 64px)", minHeight: compact ? "calc(100vh - 136px)" : undefined, padding: compact ? 14 : 22, display: "grid", gridTemplateColumns: compact ? "1fr" : "1fr 340px", gap: 16, overflow: compact ? "auto" : "hidden" }}>
       <section style={card({ padding: 18, minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr", gap: 14 })}>
         <div>
           <h1 style={{ margin: 0, fontSize: 20 }}>生成记录</h1>
-          <div style={tinyLabel()}>轻量任务记录：查看、重试、复制提示词、加入资产库。</div>
+          <div style={tinyLabel()}>查看生成结果、复制提示词、定位失败原因。</div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {[
-            `全部 ${counts.total}`,
-            `提示词 ${counts.prompts}`,
-            `视频 ${counts.videos}`,
-            `视觉图 ${counts.visuals}`,
-            `失败 ${counts.failed}`,
-          ].map((item, index) => <span key={item} style={pill(index === 0)}>{item}</span>)}
+          {filterItems.map((item) => (
+            <button key={item.key} onClick={() => setFilter(item.key)} style={{ ...pill(filter === item.key), cursor: "pointer" }}>
+              {item.label} {item.count}
+            </button>
+          ))}
         </div>
         <div style={{ minHeight: 0, overflow: "auto", display: "grid", gap: 10, alignContent: "start" }}>
-          {records.map((record) => (
+          {filteredRecords.map((record) => (
             <div key={record.id} style={card({ padding: 12, display: "grid", gridTemplateColumns: compact ? "1fr" : "140px 1fr 86px 176px", alignItems: "center", gap: 12, borderColor: record.status === "失败" ? "#f1c7c0" : C.line, background: record.status === "失败" ? "#fff7f5" : C.panel })}>
               <div>
                 <strong style={{ fontSize: 13 }}>{record.type}</strong>
@@ -2194,7 +2209,7 @@ function GenerationRecordsView({ project, shots }: { project?: Project; shots: S
               </div>
             </div>
           ))}
-          {records.length === 0 && <Empty title={project ? "还没有生成记录。" : "请先选择项目。"} icon={<Clock size={36} />} />}
+          {filteredRecords.length === 0 && <Empty title={project ? "当前筛选下还没有记录。" : "请先选择项目。"} icon={<Clock size={36} />} />}
         </div>
       </section>
       <aside style={card({ padding: 16, alignSelf: "start" })}>
@@ -2204,8 +2219,18 @@ function GenerationRecordsView({ project, shots }: { project?: Project; shots: S
           <Metric label="成功视频" value={String(counts.videos)} />
           <Metric label="失败任务" value={String(counts.failed)} />
         </div>
+        <div style={{ ...card({ padding: 12, background: C.panelSoft, marginTop: 12 }) }}>
+          <div style={{ fontSize: 13, fontWeight: 900, marginBottom: 6 }}>{firstFailed ? "优先处理失败" : latestVideo ? "最新视频已就绪" : "等待生成"}</div>
+          <div style={{ ...tinyLabel(), lineHeight: 1.7 }}>
+            {firstFailed
+              ? `${firstFailed.scope}：${firstFailed.error || "失败原因待查看"}`
+              : latestVideo
+                ? `${latestVideo.scope} 已生成，可在列表中查看。`
+                : "生成分镜草图、机位图、15秒提示词或视频后会出现在这里。"}
+          </div>
+        </div>
         <div style={{ ...tinyLabel(), lineHeight: 1.7, marginTop: 12 }}>
-          失败任务会保留原因；回到“镜头工作台”后，当前视频段顶部会出现重试按钮。
+          失败任务会保留原因；回到“镜头工作台”后，可对当前视频段直接重试。
         </div>
       </aside>
     </div>
