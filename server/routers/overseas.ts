@@ -1427,6 +1427,7 @@ Return ONLY the prompt text.`,
   updateAsset: protectedProcedure
     .input(z.object({
       id: z.number().int(),
+      type: ASSET_TYPE_ENUM.optional(),
       name: z.string().optional(),
       description: z.string().optional(),
       mjPrompt: z.string().optional(),

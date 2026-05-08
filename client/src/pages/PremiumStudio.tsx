@@ -1271,6 +1271,14 @@ function AssetsView({ project }: { project?: Project }) {
     description: "",
     file: null,
   });
+  const [editForm, setEditForm] = useState<{ type: AssetType; name: string; description: string; tags: string; isGlobalRef: boolean; file: File | null }>({
+    type: "custom",
+    name: "",
+    description: "",
+    tags: "",
+    isGlobalRef: true,
+    file: null,
+  });
   const { data = [] } = trpc.overseas.listAssets.useQuery(
     { projectId: project?.id ?? 0 },
     { enabled: Boolean(project?.id) }
@@ -1284,6 +1292,7 @@ function AssetsView({ project }: { project?: Project }) {
   const selected = assets.find((asset) => asset.id === selectedId) ?? assets[0];
   const createAsset = trpc.overseas.createAsset.useMutation();
   const uploadAsset = trpc.overseas.uploadAssetToS3.useMutation();
+  const updateAsset = trpc.overseas.updateAsset.useMutation();
   const deleteAsset = trpc.overseas.deleteAsset.useMutation({
     onSuccess: () => {
       toast.success("资产已删除");
@@ -1291,6 +1300,18 @@ function AssetsView({ project }: { project?: Project }) {
     },
     onError: (err) => toast.error(err.message),
   });
+
+  useEffect(() => {
+    if (!selected) return;
+    setEditForm({
+      type: selected.type,
+      name: selected.name,
+      description: selected.description ?? "",
+      tags: selected.tags ?? "",
+      isGlobalRef: selected.isGlobalRef,
+      file: null,
+    });
+  }, [selected?.id]);
 
   const submit = async () => {
     if (!project) return toast.error("请先创建项目");
@@ -1319,6 +1340,35 @@ function AssetsView({ project }: { project?: Project }) {
       await utils.overseas.listAssets.invalidate({ projectId: project.id });
     } catch (err: any) {
       toast.error(err.message || "添加失败");
+    }
+  };
+  const saveSelected = async () => {
+    if (!project || !selected) return;
+    if (!editForm.name.trim()) return toast.error("请填写资产名称");
+    try {
+      await updateAsset.mutateAsync({
+        id: selected.id,
+        type: editForm.type,
+        name: editForm.name.trim(),
+        description: editForm.description,
+        tags: editForm.tags,
+        isGlobalRef: editForm.isGlobalRef,
+      });
+      if (editForm.file) {
+        const fileBase64 = await fileToBase64(editForm.file);
+        await uploadAsset.mutateAsync({
+          assetId: selected.id,
+          field: "referenceImageUrl",
+          fileBase64,
+          contentType: editForm.file.type || "image/png",
+          fileName: editForm.file.name,
+        });
+      }
+      toast.success("资产已保存");
+      setEditForm((prev) => ({ ...prev, file: null }));
+      await utils.overseas.listAssets.invalidate({ projectId: project.id });
+    } catch (err: any) {
+      toast.error(err.message || "保存失败");
     }
   };
 
@@ -1353,7 +1403,6 @@ function AssetsView({ project }: { project?: Project }) {
             <div style={tinyLabel()}>人物、场景、服装、道具、分镜草图和机位图都在这里统一管理。</div>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <Button variant="outline" style={{ borderColor: C.line, borderRadius: 8 }}><Search size={14} /> 批量管理</Button>
             <Button disabled={!project || createAsset.isPending || uploadAsset.isPending} onClick={submit} style={{ background: C.ink, color: "#fff", borderRadius: 8 }}>
               {createAsset.isPending || uploadAsset.isPending ? <Loader2 className="animate-spin" size={14} /> : <Plus size={14} />}
               添加资产
@@ -1384,7 +1433,10 @@ function AssetsView({ project }: { project?: Project }) {
         </div>
       </section>
       <aside style={card({ padding: 16, minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr auto", gap: 12 })}>
-        <div style={{ fontSize: 16, fontWeight: 900 }}>资产详情</div>
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 900 }}>添加资产</div>
+          <div style={tinyLabel()}>上传人物、场景、道具或固定参考图。</div>
+        </div>
         <div style={{ display: "grid", gap: 9 }}>
           <Select value={form.type} onValueChange={(value) => setForm((prev) => ({ ...prev, type: value as AssetType }))}>
             <SelectTrigger style={field()}><SelectValue /></SelectTrigger>
@@ -1403,19 +1455,44 @@ function AssetsView({ project }: { project?: Project }) {
         <div style={{ minHeight: 0, overflow: "auto", borderTop: `1px solid ${C.line}`, paddingTop: 12 }}>
           {selected ? (
             <div style={{ display: "grid", gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 900 }}>编辑选中资产</div>
+                <div style={tinyLabel()}>{assetTag(selected)} · 会用于 Seedance 多参引用</div>
+              </div>
               <div style={{ height: 170, background: C.panelSoft, borderRadius: 8, overflow: "hidden", display: "grid", placeItems: "center" }}>
                 {assetImage(selected) ? <img src={assetImage(selected)!} alt={selected.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <ImageIcon size={30} style={{ color: C.dim }} />}
               </div>
-              <div style={{ fontWeight: 900 }}>{selected.name}</div>
-              <div style={pill(true)}><AtSign size={13} /> {assetTag(selected)}</div>
-              <div style={{ ...tinyLabel(), lineHeight: 1.65 }}>{selected.description || "暂无说明"}</div>
+              <Select value={editForm.type} onValueChange={(value) => setEditForm((prev) => ({ ...prev, type: value as AssetType }))}>
+                <SelectTrigger style={field()}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(["character", "scene", "costume", "prop", "storyboard", "camera_diagram", "custom"] as AssetType[]).map((type) => <SelectItem key={type} value={type}>{assetLabel[type]}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <Input value={editForm.name} onChange={(event) => setEditForm((prev) => ({ ...prev, name: event.target.value }))} placeholder="资产名称" style={field()} />
+              <Textarea value={editForm.description} onChange={(event) => setEditForm((prev) => ({ ...prev, description: event.target.value }))} placeholder="说明、连续性要求、可见细节" rows={3} style={{ ...field(), resize: "none" }} />
+              <Input value={editForm.tags} onChange={(event) => setEditForm((prev) => ({ ...prev, tags: event.target.value }))} placeholder="标签，例如 主角,夜店,红外套" style={field()} />
+              <button type="button" onClick={() => setEditForm((prev) => ({ ...prev, isGlobalRef: !prev.isGlobalRef }))} style={{ ...card({ padding: 10, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer" }) }}>
+                <span style={{ fontSize: 13, fontWeight: 900 }}>固定参考</span>
+                <span style={pill(editForm.isGlobalRef)}>{editForm.isGlobalRef ? "启用" : "关闭"}</span>
+              </button>
+              <label style={{ ...card({ padding: 10, display: "flex", alignItems: "center", gap: 8, cursor: "pointer", color: C.sub }) }}>
+                <Upload size={15} />
+                <span style={tinyLabel()}>{editForm.file ? editForm.file.name : "替换参考图"}</span>
+                <input hidden type="file" accept="image/*" onChange={(event) => setEditForm((prev) => ({ ...prev, file: event.target.files?.[0] ?? null }))} />
+              </label>
               {(selected.mjPrompt || selected.stylePrompt) && <div style={{ ...tinyLabel(), whiteSpace: "pre-wrap", background: C.panelSoft, borderRadius: 8, padding: 10 }}>{selected.mjPrompt || selected.stylePrompt}</div>}
             </div>
           ) : <Empty title="选择一个资产查看详情。" icon={<Database size={34} />} />}
         </div>
-        <Button variant="outline" disabled={!selected || deleteAsset.isPending} onClick={() => selected && deleteAsset.mutate({ id: selected.id })} style={{ borderColor: C.line, borderRadius: 8, color: C.red }}>
-          <Trash2 size={14} /> 删除资产
-        </Button>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <Button disabled={!selected || updateAsset.isPending || uploadAsset.isPending} onClick={saveSelected} style={{ background: C.ink, color: "#fff", borderRadius: 8 }}>
+            {updateAsset.isPending || uploadAsset.isPending ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
+            保存
+          </Button>
+          <Button variant="outline" disabled={!selected || deleteAsset.isPending} onClick={() => selected && deleteAsset.mutate({ id: selected.id })} style={{ borderColor: C.line, borderRadius: 8, color: C.red }}>
+            <Trash2 size={14} /> 删除
+          </Button>
+        </div>
       </aside>
     </div>
   );
