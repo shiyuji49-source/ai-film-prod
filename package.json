@@ -9,6 +9,7 @@
     "start": "NODE_ENV=production node dist/index.js",
     "check": "tsc --noEmit",
     "deploy:volcengine": "bash scripts/deploy-volcengine.sh",
+    "check:lq-image2": "node scripts/check-lq-image2.mjs",
     "format": "prettier --write .",
     "test": "vitest run",
     "db:push": "drizzle-kit generate && drizzle-kit migrate",
