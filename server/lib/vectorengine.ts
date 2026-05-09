@@ -223,6 +223,32 @@ export async function generateGPTImage2(options: {
   aspectRatio?: "16:9" | "9:16" | "1:1" | "3:4" | "4:3";
   timeoutMs?: number;
 }): Promise<string> {
+  const normalizeImageUrl = (value?: string | null) => {
+    if (!value) return "";
+    if (/^https?:\/\//i.test(value) || value.startsWith("data:")) return value;
+    if (value.startsWith("/")) return `${getBaseUrl().replace(/\/+$/, "")}${value}`;
+    return value;
+  };
+  const extractImageUrl = (data: any): string => {
+    const candidates = [
+      data?.data?.[0]?.url,
+      data?.data?.[0]?.image_url?.url,
+      data?.data?.[0]?.image_url,
+      data?.data?.[0]?.output_url,
+      data?.data?.[0]?.images?.[0]?.url,
+      data?.output?.[0]?.url,
+      data?.output?.[0]?.image_url?.url,
+      data?.url,
+      data?.image_url?.url,
+      data?.image_url,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === "string" && candidate.trim()) return normalizeImageUrl(candidate.trim());
+    }
+    const b64 = data?.data?.[0]?.b64_json || data?.b64_json || data?.output?.[0]?.b64_json;
+    if (typeof b64 === "string" && b64) return `data:image/png;base64,${b64}`;
+    return "";
+  };
   const sizeByRatio: Record<string, string> = {
     "16:9": "1536x1024",
     "9:16": "1024x1536",
@@ -260,11 +286,8 @@ export async function generateGPTImage2(options: {
     }
 
     const data = await res.json();
-    const item = data.data?.[0];
-    if (item?.url) return item.url;
-    if (item?.b64_json) return `data:image/png;base64,${item.b64_json}`;
-    if (data.url) return data.url;
-    if (data.b64_json) return `data:image/png;base64,${data.b64_json}`;
+    const imageUrl = extractImageUrl(data);
+    if (imageUrl) return imageUrl;
     throw new Error("gpt-image-2: no image returned");
   }
 

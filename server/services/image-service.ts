@@ -2,6 +2,7 @@
  * Image Service — 统一图片生成入口
  *
  * 唯一的图片生成函数 generateImage()，按 engine 参数分发到对应底层通道：
+ * - image2                       → VectorEngine gpt-image-2（精品剧分镜草图/机位图只允许使用此通道）
  * - seedream-4.5 / seedream-5.0  → 火山引擎 ARK API（直调）
  * - midjourney                   → VectorEngine MJ API
  * - nano-banana-pro               → VectorEngine Gemini 3 Pro Image（fallback→Seedream 5.0）
@@ -17,6 +18,7 @@ import {
   type SeedreamModel,
 } from "../lib/vectorengine";
 import { storagePut } from "../storage";
+import { ENV } from "../_core/env";
 
 // ─── 引擎类型 ──────────────────────────────────────────────────────────────────
 
@@ -78,10 +80,7 @@ export async function generateImage(options: GenerateImageOptions): Promise<Gene
   let taskId = "";
 
   if (engine === "image2") {
-    rawUrl = await generateGPTImage2({
-      prompt,
-      aspectRatio,
-    });
+    rawUrl = await generateGPTImage2({ prompt, aspectRatio });
   } else if (engine === "midjourney") {
     rawUrl = await generateMJImageAndWait({ prompt, referenceImageUrl });
   } else if (engine === "nano-banana-pro") {
@@ -150,7 +149,17 @@ export async function _uploadImageToS3(rawUrl: string, s3KeyPrefix: string): Pro
     mimeType = base64Match[1];
     buf = Buffer.from(base64Match[2], "base64");
   } else {
-    const resp = await fetch(rawUrl);
+    const headers: HeadersInit = {};
+    try {
+      const imageUrl = new URL(rawUrl);
+      const vectorEngineUrl = new URL(ENV.vectorEngineApiUrl || "https://api.vectorengine.ai");
+      if (imageUrl.host === vectorEngineUrl.host && ENV.vectorEngineApiKey) {
+        headers.Authorization = `Bearer ${ENV.vectorEngineApiKey}`;
+      }
+    } catch {
+      // Non-URL values are handled by fetch below so the original error stays visible.
+    }
+    const resp = await fetch(rawUrl, { headers });
     if (!resp.ok) throw new Error(`Failed to download image: ${resp.status}`);
     buf = Buffer.from(await resp.arrayBuffer());
   }

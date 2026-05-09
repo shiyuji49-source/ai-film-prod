@@ -2793,7 +2793,7 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
         const aspectRatio = project.aspectRatio === "landscape" ? "16:9" : "9:16";
         const { url } = await generateImage({
           prompt,
-          engine: toImageEngine(input.imageEngine),
+          engine: "image2",
           aspectRatio,
           s3KeyPrefix: `premium-storyboards/${ctx.user.id}/${shot.projectId}`,
         });
@@ -3056,7 +3056,7 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
         const aspectRatio = project.aspectRatio === "landscape" ? "16:9" : "9:16";
         const { url } = await generateImage({
           prompt,
-          engine: toImageEngine(input.imageEngine),
+          engine: "image2",
           aspectRatio,
           s3KeyPrefix: `premium-camera-diagrams/${ctx.user.id}/${shot.projectId}`,
         });

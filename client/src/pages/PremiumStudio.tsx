@@ -1742,7 +1742,7 @@ function ShotWorkbench({
               ) : <Empty title="选择一个视频段或分镜" icon={<FileText size={34} />} />}
             </section>
           )}
-          <section style={card({ padding: 0, minHeight: videoMode ? 520 : 0, display: "grid", gridTemplateRows: videoMode ? "minmax(260px, 1fr) auto" : "1fr", overflow: "hidden" })}>
+          <section style={card({ padding: 0, minHeight: 0, display: "grid", gridTemplateRows: videoMode ? "minmax(160px, 0.65fr) minmax(300px, 1fr)" : "1fr", overflow: "hidden" })}>
             <div style={{ background: C.panelSoft, display: "grid", placeItems: "center", overflow: "hidden" }}>
               {currentSegment?.videoUrl || segmentLead?.videoUrl ? (
                 <video src={currentSegment?.videoUrl || segmentLead?.videoUrl || ""} controls style={{ width: "100%", height: "100%", objectFit: "contain" }} />
@@ -1902,7 +1902,7 @@ function SeedanceComposer({
   const filteredAssets = availableAssets.filter((asset) => assetFilter === "all" || asset.type === assetFilter);
 
   return (
-    <div style={{ borderTop: `1px solid ${C.line}`, padding: 12, background: "#fff", display: "grid", gap: 9 }}>
+    <div style={{ borderTop: `1px solid ${C.line}`, padding: 12, background: "#fff", display: "grid", gap: 9, maxHeight: compact ? undefined : 430, overflowY: "auto", minHeight: 0 }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "center" }}>
         <div style={{ display: "flex", gap: 8, overflowX: "auto", minWidth: 0, paddingBottom: 2 }}>
           {selectedAssets.map((asset) => (
@@ -1943,7 +1943,7 @@ function SeedanceComposer({
         onChange={(event) => onPrompt(event.target.value)}
         placeholder="描述这个视频段，或生成 15 秒 Seedance 2.0 提示词..."
         rows={8}
-        style={{ ...field(), resize: "none", lineHeight: 1.6 }}
+        style={{ ...field(), resize: "none", lineHeight: 1.6, minHeight: compact ? 180 : 220, maxHeight: compact ? 220 : 260, overflowY: "auto" }}
       />
       {assetPickerOpen && (
         <div style={card({ padding: 10, background: C.panelSoft })}>
@@ -1990,7 +1990,7 @@ function SeedanceComposer({
           </div>
         </div>
       )}
-      <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      <div style={{ position: "sticky", bottom: -12, zIndex: 2, background: "#fff", borderTop: `1px solid ${C.line}`, margin: "0 -12px -12px", padding: "10px 12px 12px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", boxShadow: "0 -8px 18px rgba(20,20,20,0.04)" }}>
         <button style={pill()}><Plus size={13} /></button>
         <button style={pill(true)}><Film size={13} /> 视频 2.0</button>
         <button style={pill(true)}><Sparkles size={13} /> Seedance 2.0</button>
