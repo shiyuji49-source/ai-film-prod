@@ -361,7 +361,9 @@ function generationErrorMessage(err: unknown, fallback: string) {
   if (!raw) return fallback;
   if (raw.includes("insufficient_quota") || raw.includes("quota") || raw.includes("余额")) return "API 额度不足，请检查 LQ/模型渠道余额。";
   if (raw.includes("401") || raw.includes("403") || raw.includes("Unauthorized") || raw.includes("Forbidden")) return "API 鉴权失败，请检查服务器 .env 里的 API Key。";
-  if (raw.includes("No available channels") || raw.includes("503") || raw.includes("无可用渠道")) return "模型渠道暂时不可用，请稍后重试或切换模型渠道。";
+  if (raw.includes("openai/gpt-image-2 模型渠道不可用")) return "LQ 的 gpt-image-2 模型渠道不可用或账号未开通，请在 LQ 后台确认 image2 通道。";
+  if (raw.includes("缺少 messages")) return "LQ image2 请求格式不匹配或服务器未部署最新代码，请部署最新版本后重试。";
+  if (raw.includes("No available channels") || raw.includes("503") || raw.includes("无可用渠道")) return "模型渠道暂时不可用，请稍后重试或确认对应模型通道已开通。";
   if (raw.includes("timeout") || raw.includes("ETIMEDOUT") || raw.includes("fetch failed")) return "网络或模型接口超时，请稍后重试。";
   if (raw.includes("TOS") || raw.includes("S3") || raw.includes("storage") || raw.includes("download image")) return "生成成功但文件保存失败，请检查 TOS 对象存储配置。";
   return raw.length > 220 ? `${raw.slice(0, 220)}...` : raw;

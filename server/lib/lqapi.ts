@@ -79,8 +79,8 @@ export async function callLQChat(options: LQChatCompletionOptions): Promise<stri
   return stripMarkdownFence(content);
 }
 
-function postChatPayload(payload: any, timeoutMs: number) {
-  return fetch(`${getBaseUrl()}/chat/completions`, {
+function postLQPayload(path: string, payload: any, timeoutMs: number) {
+  return fetch(`${getBaseUrl()}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -91,13 +91,18 @@ function postChatPayload(payload: any, timeoutMs: number) {
   });
 }
 
-async function postChatPayloadJson(
+function postChatPayload(payload: any, timeoutMs: number) {
+  return postLQPayload("/chat/completions", payload, timeoutMs);
+}
+
+async function postLQPayloadJson(
+  path: string,
   payload: any,
   timeoutMs: number
 ): Promise<{ ok: true; data: any } | { ok: false; status: number; text: string }> {
   const maxRetries = 6;
   for (let attempt = 0; attempt < maxRetries; attempt++) {
-    const res = await postChatPayload(payload, timeoutMs);
+    const res = await postLQPayload(path, payload, timeoutMs);
     if (res.ok) return { ok: true, data: await res.json() };
 
     const text = await res.text();
@@ -111,6 +116,10 @@ async function postChatPayloadJson(
   }
 
   return { ok: false, status: 0, text: "request failed after max retries" };
+}
+
+function postChatPayloadJson(payload: any, timeoutMs: number) {
+  return postLQPayloadJson("/chat/completions", payload, timeoutMs);
 }
 
 function shouldRetry(status: number, text: string) {
@@ -162,32 +171,53 @@ export async function generateLQImage2(options: {
     "4:3": "1536x1024",
   };
   const preferredSize = sizeByRatio[options.aspectRatio ?? "9:16"] ?? "1024x1024";
-  const buildBody = (size: string) => ({
+  const buildChatBody = (size: string, content: any, withPrompt = true) => ({
     model: "openai/gpt-image-2",
-    messages: [{ role: "user", content: withEphemeralCache(options.prompt) }],
-    prompt: options.prompt,
+    messages: [{ role: "user", content }],
+    ...(withPrompt ? { prompt: options.prompt } : {}),
     size,
     stream: false,
   });
-  const requestBodies = [
-    buildBody(preferredSize),
-    buildBody("1024x1024"),
+  const buildImageBody = (size: string, model: string) => ({
+    model,
+    prompt: options.prompt,
+    size,
+  });
+  const requestBodies: Array<{ path: string; label: string; body: any }> = [
+    { path: "/chat/completions", label: "chat_messages_string", body: buildChatBody(preferredSize, options.prompt) },
+    { path: "/chat/completions", label: "chat_messages_string_square", body: buildChatBody("1024x1024", options.prompt) },
+    { path: "/chat/completions", label: "chat_messages_parts", body: buildChatBody(preferredSize, withEphemeralCache(options.prompt)) },
+    { path: "/chat/completions", label: "chat_messages_only", body: buildChatBody("1024x1024", options.prompt, false) },
+    { path: "/chat/completions", label: "chat_prompt_only", body: { model: "openai/gpt-image-2", prompt: options.prompt, size: "1024x1024", stream: false } },
+    { path: "/images/generations", label: "images_openai_prefixed", body: buildImageBody("1024x1024", "openai/gpt-image-2") },
+    { path: "/images/generations", label: "images_gpt_image_2", body: buildImageBody("1024x1024", "gpt-image-2") },
   ];
 
-  let lastError = "";
-  for (const body of requestBodies) {
-    const result = await postChatPayloadJson(body, options.timeoutMs ?? 180000);
+  const errors: string[] = [];
+  for (const request of requestBodies) {
+    const result = await postLQPayloadJson(request.path, request.body, options.timeoutMs ?? 180000);
     if (!result.ok) {
-      lastError = result.text;
+      errors.push(`${request.label}: ${result.text}`);
       continue;
     }
 
     const imageUrl = extractImageUrl(result.data);
     if (imageUrl) return imageUrl;
-    lastError = JSON.stringify(result.data).slice(0, 1000);
+    errors.push(`${request.label}: ${JSON.stringify(result.data).slice(0, 1000)}`);
   }
 
-  throw new Error(`LQ image2 API error: ${lastError || "no image returned"}`);
+  throw new Error(`LQ image2 API error: ${summarizeLQImageErrors(errors)}`);
+}
+
+function summarizeLQImageErrors(errors: string[]) {
+  const joined = errors.join(" | ");
+  if (joined.includes("No available channels") || joined.includes("无可用渠道") || joined.includes("模型渠道")) {
+    return "openai/gpt-image-2 模型渠道不可用或账号未开通。请在 LQ 后台确认该模型可用。";
+  }
+  if (joined.includes("缺少 messages") || joined.includes("missing messages")) {
+    return "LQ 网关仍提示缺少 messages。请确认服务器已部署最新代码；如仍存在，需要 LQ 提供 image2 的 Node/cURL 精确请求格式。";
+  }
+  return joined.slice(0, 1800) || "no image returned";
 }
 
 function extractImageUrl(data: any): string {
