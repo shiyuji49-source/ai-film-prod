@@ -11,13 +11,17 @@ export const ENV = {
   // Stripe
   stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
-  // VectorEngine (unified API proxy for all AI services)
+  // VectorEngine (legacy/optional image and generic video providers)
   vectorEngineApiKey: process.env.VECTORENGINE_API_KEY ?? "",
   vectorEngineApiUrl: process.env.VECTORENGINE_API_URL ?? "https://api.vectorengine.ai",
+  // LQ API (LLM + image2)
+  lqApiKey: process.env.LQ_API_KEY ?? "",
+  lqApiUrl: process.env.LQ_API_URL ?? "https://lqapi.top/v1",
+  lqUserId: process.env.LQ_USER_ID ?? "liuguang_internal",
   // ARK API (Volcano Engine direct API for Seedance video generation)
   arkApiKey: process.env.ARK_API_KEY ?? "",
   arkApiUrl: "https://ark.cn-beijing.volces.com/api/v3",
-  // Legacy (kept for backward compatibility, now routed through VectorEngine)
+  // Legacy (kept for backward compatibility)
   geminiApiKey: process.env.GEMINI_API_KEY ?? "",
   falApiKey: process.env.FAL_API_KEY ?? "",
 };

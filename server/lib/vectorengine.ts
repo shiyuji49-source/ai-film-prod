@@ -1,6 +1,7 @@
 /**
- * VectorEngine Unified API Client
- * All AI calls (Claude, MJ, Seedream, Seedance, Video models) go through VectorEngine proxy.
+ * VectorEngine legacy/optional provider client.
+ * LLM and image2 are handled by server/lib/lqapi.ts; this file remains for MJ,
+ * Gemini image, generic video routes, and ARK direct helpers.
  */
 import { ENV } from "../_core/env";
 
@@ -11,8 +12,8 @@ const getBaseUrl = () => ENV.vectorEngineApiUrl || "https://api.vectorengine.ai"
 const getApiKey = () => ENV.vectorEngineApiKey;
 
 // ============================================================
-// LLM Models (via VectorEngine OpenAI-compatible chat API)
-// 所有工作流 LLM 统一使用 claude-sonnet-4-6
+// Legacy LLM aliases. New workflow LLM calls use server/services/llm-service.ts
+// and are routed to LQ API.
 // ============================================================
 
 /** 默认 LLM 模型：claude-sonnet-4-6 — 适用于所有工作流任务 */
@@ -212,86 +213,6 @@ export async function generateMJImageAndWait(options: {
     // SUBMITTED, IN_PROGRESS, etc. - keep polling
   }
   throw new Error(`MJ task timed out after ${timeoutMs / 1000}s (taskId: ${taskId})`);
-}
-
-// ============================================================
-// GPT Image 2 (via VectorEngine OpenAI-compatible image API)
-// ============================================================
-
-export async function generateGPTImage2(options: {
-  prompt: string;
-  aspectRatio?: "16:9" | "9:16" | "1:1" | "3:4" | "4:3";
-  timeoutMs?: number;
-}): Promise<string> {
-  const normalizeImageUrl = (value?: string | null) => {
-    if (!value) return "";
-    if (/^https?:\/\//i.test(value) || value.startsWith("data:")) return value;
-    if (value.startsWith("/")) return `${getBaseUrl().replace(/\/+$/, "")}${value}`;
-    return value;
-  };
-  const extractImageUrl = (data: any): string => {
-    const candidates = [
-      data?.data?.[0]?.url,
-      data?.data?.[0]?.image_url?.url,
-      data?.data?.[0]?.image_url,
-      data?.data?.[0]?.output_url,
-      data?.data?.[0]?.images?.[0]?.url,
-      data?.output?.[0]?.url,
-      data?.output?.[0]?.image_url?.url,
-      data?.url,
-      data?.image_url?.url,
-      data?.image_url,
-    ];
-    for (const candidate of candidates) {
-      if (typeof candidate === "string" && candidate.trim()) return normalizeImageUrl(candidate.trim());
-    }
-    const b64 = data?.data?.[0]?.b64_json || data?.b64_json || data?.output?.[0]?.b64_json;
-    if (typeof b64 === "string" && b64) return `data:image/png;base64,${b64}`;
-    return "";
-  };
-  const sizeByRatio: Record<string, string> = {
-    "16:9": "1536x1024",
-    "9:16": "1024x1536",
-    "1:1": "1024x1024",
-    "3:4": "1024x1536",
-    "4:3": "1536x1024",
-  };
-  const bodyBase = {
-    model: "gpt-image-2",
-    prompt: options.prompt,
-    size: sizeByRatio[options.aspectRatio ?? "9:16"] ?? "1024x1536",
-  };
-
-  const url = `${getBaseUrl()}/v1/images/generations`;
-  const headers = {
-    "Content-Type": "application/json",
-    "Authorization": `Bearer ${getApiKey()}`,
-  };
-
-  let lastError = "";
-  for (const body of [
-    { ...bodyBase, response_format: "url" },
-    bodyBase,
-  ]) {
-    const res = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(options.timeoutMs ?? 180000),
-    });
-
-    if (!res.ok) {
-      lastError = await res.text();
-      continue;
-    }
-
-    const data = await res.json();
-    const imageUrl = extractImageUrl(data);
-    if (imageUrl) return imageUrl;
-    throw new Error("gpt-image-2: no image returned");
-  }
-
-  throw new Error(`gpt-image-2 error: ${lastError || "request failed"}`);
 }
 
 // ============================================================

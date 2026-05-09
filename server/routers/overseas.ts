@@ -268,7 +268,7 @@ function parseStringArray(value?: string | null): string[] {
 function generationErrorMessage(err: unknown, fallback: string) {
   const raw = err instanceof Error ? err.message : String(err || "");
   if (!raw) return fallback;
-  if (raw.includes("insufficient_quota") || raw.includes("quota") || raw.includes("余额")) return "API 额度不足，请检查 VectorEngine/模型渠道余额。";
+  if (raw.includes("insufficient_quota") || raw.includes("quota") || raw.includes("余额")) return "API 额度不足，请检查 LQ/模型渠道余额。";
   if (raw.includes("401") || raw.includes("403") || raw.includes("Unauthorized") || raw.includes("Forbidden")) return "API 鉴权失败，请检查服务器 .env 里的 API Key。";
   if (raw.includes("No available channels") || raw.includes("503") || raw.includes("无可用渠道")) return "模型渠道暂时不可用，请稍后重试或切换模型渠道。";
   if (raw.includes("timeout") || raw.includes("ETIMEDOUT") || raw.includes("fetch failed")) return "网络或模型接口超时，请稍后重试。";

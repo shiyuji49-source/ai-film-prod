@@ -61,7 +61,7 @@ const GLOBAL_VIDEO_CONSTRAINTS = `
 - 旁白（VO）仅作为画外音，不在画面中显示文字
 `;
 
-// ─── AI API Helpers (via llm-service → VectorEngine → claude-sonnet-4-6) ─────
+// ─── AI API Helpers (via llm-service → LQ API → claude-sonnet-4-6) ───────────
 
 /** 剧本解析用：快速模式（结构化输出，temperature 0.5） */
 const callGeminiFlash = (prompt: string, _maxOutputTokens = 65536) =>
