@@ -71,6 +71,65 @@ export interface ProjectBible {
   avoidRules: string[];
 }
 
+function toReadableText(value: unknown, fallback = ""): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => toReadableText(item))
+      .filter(Boolean)
+      .map((item) => (item.includes("\n") ? item : `- ${item}`))
+      .join("\n")
+      .trim();
+  }
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    return entries
+      .map(([key, item]) => {
+        const text = toReadableText(item);
+        if (!text) return "";
+        return text.includes("\n") ? `${key}：\n${text}` : `${key}：${text}`;
+      })
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+  }
+  return fallback;
+}
+
+function toStringArray(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map((item) => toReadableText(item)).filter(Boolean);
+  const text = toReadableText(value);
+  return text ? [text] : [];
+}
+
+function toArray<T>(value: unknown): T[] {
+  if (Array.isArray(value)) return value as T[];
+  if (value && typeof value === "object") return Object.values(value as Record<string, T>);
+  return [];
+}
+
+function normalizeProjectBible(value: unknown): ProjectBible {
+  const raw = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  return {
+    projectBible: toReadableText(raw.projectBible),
+    logline: toReadableText(raw.logline),
+    inferredFormat: toReadableText(raw.inferredFormat),
+    mainCharacters: toArray<Record<string, unknown>>(raw.mainCharacters).map((item) => ({
+      name: toReadableText(item.name),
+      continuityRule: toReadableText(item.continuityRule),
+      performanceRule: toReadableText(item.performanceRule),
+    })).filter((item) => item.name),
+    coreLocations: toArray<Record<string, unknown>>(raw.coreLocations).map((item) => ({
+      name: toReadableText(item.name),
+      continuityRule: toReadableText(item.continuityRule),
+    })).filter((item) => item.name),
+    visualRules: toReadableText(raw.visualRules),
+    continuityRules: toStringArray(raw.continuityRules),
+    avoidRules: toStringArray(raw.avoidRules),
+  };
+}
+
 // ─── System Prompt 模板 ────────────────────────────────────────────────────────
 
 const PROMPT_METHODOLOGY = `核心方法论：
@@ -470,7 +529,7 @@ ${script.slice(0, 80000)}
     temperature: 0.65,
   });
 
-  return parseLlmJson<ProjectBible>(response, "项目导演规则");
+  return normalizeProjectBible(parseLlmJson<unknown>(response, "项目导演规则"));
 }
 
 /**
