@@ -162,9 +162,16 @@ export async function generateLQImage2(options: {
     "4:3": "1536x1024",
   };
   const preferredSize = sizeByRatio[options.aspectRatio ?? "9:16"] ?? "1024x1024";
+  const buildBody = (size: string) => ({
+    model: "openai/gpt-image-2",
+    messages: [{ role: "user", content: withEphemeralCache(options.prompt) }],
+    prompt: options.prompt,
+    size,
+    stream: false,
+  });
   const requestBodies = [
-    { model: "openai/gpt-image-2", prompt: options.prompt, size: preferredSize, stream: false },
-    { model: "openai/gpt-image-2", prompt: options.prompt, size: "1024x1024", stream: false },
+    buildBody(preferredSize),
+    buildBody("1024x1024"),
   ];
 
   let lastError = "";
@@ -184,9 +191,11 @@ export async function generateLQImage2(options: {
 }
 
 function extractImageUrl(data: any): string {
+  const contentParts = data?.choices?.[0]?.message?.content;
   const content = normalizeMessageContent(data?.choices?.[0]?.message?.content);
   const parsedContent = tryParseJson(content);
   const candidates = [
+    extractImageUrlFromParts(contentParts),
     data?.data?.[0]?.url,
     data?.data?.[0]?.image_url?.url,
     data?.data?.[0]?.image_url,
@@ -221,6 +230,43 @@ function extractImageUrl(data: any): string {
     return b64.startsWith("data:image/") ? b64 : `data:image/png;base64,${b64}`;
   }
 
+  return "";
+}
+
+function extractImageUrlFromParts(parts: any): string {
+  const queue = Array.isArray(parts) ? [...parts] : [parts];
+  while (queue.length) {
+    const item = queue.shift();
+    if (!item) continue;
+    if (typeof item === "string") {
+      const found = extractUrlFromText(item) || extractBase64FromText(item);
+      if (found) return found;
+      continue;
+    }
+    if (typeof item !== "object") continue;
+    if (typeof item.b64_json === "string" && item.b64_json.trim()) {
+      const b64 = item.b64_json.trim();
+      return b64.startsWith("data:image/") ? b64 : `data:image/png;base64,${b64}`;
+    }
+    const candidates = [
+      item.url,
+      item.image_url?.url,
+      item.image_url,
+      item.output_url,
+      item.text,
+      item.content,
+    ];
+    for (const candidate of candidates) {
+      if (typeof candidate === "string" && candidate.trim()) {
+        if (/^(https?:\/\/|data:image\/)/i.test(candidate)) return candidate.trim();
+        const found = extractUrlFromText(candidate) || extractBase64FromText(candidate);
+        if (found) return found;
+      }
+    }
+    for (const value of Object.values(item)) {
+      if (value && typeof value === "object") queue.push(value);
+    }
+  }
   return "";
 }
 

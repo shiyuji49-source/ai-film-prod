@@ -265,6 +265,97 @@ function parseStringArray(value?: string | null): string[] {
   return [];
 }
 
+type AssetPromptRecord = {
+  type: "character" | "scene" | "costume" | "prop" | "custom";
+  name: string;
+  status: "confirmed" | "needs_user_input";
+  priority: "high" | "medium" | "low";
+  mainWeight: string;
+  supportingWeight: string;
+  assetPrompt: string;
+  continuityRule: string;
+  variationRule: string;
+  usedInEpisodes: string;
+  conflictCheck: string;
+};
+
+function readableText(value: unknown): string {
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (Array.isArray(value)) return value.map(readableText).filter(Boolean).join("\n");
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, item]) => {
+        const text = readableText(item);
+        return text ? `${key}：${text}` : "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  return "";
+}
+
+function normalizeAssetType(value: unknown): AssetPromptRecord["type"] {
+  const type = readableText(value);
+  if (["character", "scene", "costume", "prop", "custom"].includes(type)) return type as AssetPromptRecord["type"];
+  return "custom";
+}
+
+function normalizeAssetStatus(value: unknown): AssetPromptRecord["status"] {
+  return readableText(value) === "needs_user_input" ? "needs_user_input" : "confirmed";
+}
+
+function normalizeAssetPriority(value: unknown): AssetPromptRecord["priority"] {
+  const priority = readableText(value);
+  if (["high", "medium", "low"].includes(priority)) return priority as AssetPromptRecord["priority"];
+  return "medium";
+}
+
+function collectAssetPromptItems(value: unknown): Array<Record<string, unknown>> {
+  if (!value) return [];
+  if (typeof value === "string") {
+    try {
+      return collectAssetPromptItems(JSON.parse(value));
+    } catch {
+      return [];
+    }
+  }
+  if (Array.isArray(value)) return value.flatMap(collectAssetPromptItems);
+  if (typeof value !== "object") return [];
+
+  const record = value as Record<string, unknown>;
+  if (readableText(record.name || record.assetName || record.title)) return [record];
+
+  for (const key of ["assets", "data", "items", "result", "results"]) {
+    if (record[key]) return collectAssetPromptItems(record[key]);
+  }
+  return Object.values(record).flatMap(collectAssetPromptItems);
+}
+
+function normalizeAssetPrompts(parsed: unknown): AssetPromptRecord[] {
+  return collectAssetPromptItems(parsed)
+    .map((item) => {
+      const name = readableText(item.name || item.assetName || item.title);
+      const mainWeight = readableText(item.mainWeight);
+      const supportingWeight = readableText(item.supportingWeight);
+      const assetPrompt = readableText(item.assetPrompt || item.prompt || item.description);
+      return {
+        type: normalizeAssetType(item.type),
+        name,
+        status: normalizeAssetStatus(item.status),
+        priority: normalizeAssetPriority(item.priority),
+        mainWeight,
+        supportingWeight,
+        assetPrompt,
+        continuityRule: readableText(item.continuityRule),
+        variationRule: readableText(item.variationRule),
+        usedInEpisodes: readableText(item.usedInEpisodes) || "未知",
+        conflictCheck: readableText(item.conflictCheck),
+      };
+    })
+    .filter((asset) => asset.name && (asset.assetPrompt || asset.mainWeight || asset.supportingWeight));
+}
+
 function generationErrorMessage(err: unknown, fallback: string) {
   const raw = err instanceof Error ? err.message : String(err || "");
   if (!raw) return fallback;
@@ -1598,8 +1689,9 @@ ${scriptSummary || "暂无分镜背景"}
           },
         },
       });
-      const parsed = parseLlmJson<{ assets: Array<{ assetPrompt: string; mainWeight: string; supportingWeight: string; continuityRule: string; variationRule: string; conflictCheck: string; priority: string; status: string; usedInEpisodes: string }> }>(res, "资产提示词");
-      const next = parsed.assets[0];
+      const parsed = parseLlmJson<unknown>(res, "资产提示词");
+      const next = normalizeAssetPrompts(parsed)[0];
+      if (!next) throw new Error("资产提示词生成失败：AI 未返回可用资产。请重试或补充资产描述。");
       const mjPrompt = next.assetPrompt.trim();
       if (mjPrompt) {
         await db!.update(overseasAssets).set({
@@ -2176,21 +2268,9 @@ ${scriptText.slice(0, 80000)}
         },
       });
 
-      const parsed = parseLlmJson<{
-        assets: Array<{
-          type: "character" | "scene" | "costume" | "prop" | "custom";
-          name: string;
-          status: "confirmed" | "needs_user_input";
-          priority: "high" | "medium" | "low";
-          mainWeight: string;
-          supportingWeight: string;
-          assetPrompt: string;
-          continuityRule: string;
-          variationRule: string;
-          usedInEpisodes: string;
-          conflictCheck: string;
-        }>;
-      }>(response, "资产识别");
+      const parsed = parseLlmJson<unknown>(response, "资产识别");
+      const parsedAssets = normalizeAssetPrompts(parsed);
+      if (!parsedAssets.length) throw new Error("资产识别失败：AI 未返回可用资产，请重试或缩短剧本。");
 
       // 获取已有资产名称，避免重复
       const existingAssets = await db!.select().from(overseasAssets)
@@ -2200,7 +2280,7 @@ ${scriptText.slice(0, 80000)}
       const created: Array<{ id: number; name: string; type: string }> = [];
       const skipped: string[] = [];
 
-      for (const asset of parsed.assets) {
+      for (const asset of parsedAssets) {
         const normalizedName = asset.name.toLowerCase();
         if (existingNames.has(normalizedName)) { skipped.push(asset.name); continue; }
         const description = [
