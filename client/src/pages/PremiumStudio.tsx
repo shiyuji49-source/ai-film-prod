@@ -751,7 +751,7 @@ function OverviewView({
             {fixedAssets.slice(0, 8).map((asset) => (
               <button key={asset.id} onClick={() => onModule("assets")} style={{ ...card({ padding: 8, display: "grid", gridTemplateColumns: "42px 1fr", gap: 10, textAlign: "left", cursor: "pointer" }) }}>
                 <div style={{ width: 42, height: 42, borderRadius: 7, background: C.panelSoft, overflow: "hidden" }}>
-                  <img src={assetImage(asset)!} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  <img loading="lazy" decoding="async" src={assetImage(asset)!} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 12, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.name}</div>
@@ -1340,7 +1340,7 @@ function AssetsView({ project }: { project?: Project }) {
                   ...card({ padding: 0, overflow: "hidden", cursor: "pointer", textAlign: "left", borderColor: selected?.id === asset.id ? "#d8ccff" : C.line }),
                 }}>
                   <div style={{ height: 118, background: C.panelSoft, display: "grid", placeItems: "center", overflow: "hidden" }}>
-                    {img ? <img src={img} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <ImageIcon size={28} style={{ color: C.dim }} />}
+                    {img ? <img loading="lazy" decoding="async" src={img} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <ImageIcon size={28} style={{ color: C.dim }} />}
                   </div>
                   <div style={{ padding: 10 }}>
                     <div style={{ fontSize: 13, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.name}</div>
@@ -1382,7 +1382,7 @@ function AssetsView({ project }: { project?: Project }) {
                 <div style={tinyLabel()}>{assetTag(selected)} · 会用于 Seedance 多参引用</div>
               </div>
               <div style={{ height: 170, background: C.panelSoft, borderRadius: 8, overflow: "hidden", display: "grid", placeItems: "center" }}>
-                {assetImage(selected) ? <img src={assetImage(selected)!} alt={selected.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <ImageIcon size={30} style={{ color: C.dim }} />}
+                {assetImage(selected) ? <img loading="lazy" decoding="async" src={assetImage(selected)!} alt={selected.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <ImageIcon size={30} style={{ color: C.dim }} />}
               </div>
               <Select value={editForm.type} onValueChange={(value) => setEditForm((prev) => ({ ...prev, type: value as AssetType }))}>
                 <SelectTrigger style={field()}><SelectValue /></SelectTrigger>
@@ -1472,6 +1472,8 @@ function ShotWorkbench({
   const [referenceAudioText, setReferenceAudioText] = useState("");
   const [generateAudio, setGenerateAudio] = useState(false);
   const [watermark, setWatermark] = useState(false);
+  const [storyboardTargetId, setStoryboardTargetId] = useState<number | null>(null);
+  const [diagramTargetId, setDiagramTargetId] = useState<number | null>(null);
 
   const { data: assetData = [] } = trpc.overseas.listAssets.useQuery(
     { projectId: project?.id ?? 0 },
@@ -1500,20 +1502,24 @@ function ShotWorkbench({
   }, [currentSegment?.id]);
 
   const generateStoryboard = trpc.overseas.generateStoryboardSketch.useMutation({
+    onMutate: (variables) => setStoryboardTargetId(variables.shotId),
     onSuccess: async () => {
       toast.success("分镜草图已生成");
       if (project) await utils.overseas.getProject.invalidate({ id: project.id });
       onChanged();
     },
     onError: (err) => toast.error(err.message),
+    onSettled: () => setStoryboardTargetId(null),
   });
   const generateDiagram = trpc.overseas.generateCameraDiagram.useMutation({
+    onMutate: (variables) => setDiagramTargetId(variables.shotId),
     onSuccess: async () => {
       toast.success("机位图已生成");
       if (project) await utils.overseas.getProject.invalidate({ id: project.id });
       onChanged();
     },
     onError: (err) => toast.error(err.message),
+    onSettled: () => setDiagramTargetId(null),
   });
   const addVisual = trpc.overseas.addShotVisualToAssetLibrary.useMutation({
     onSuccess: async () => {
@@ -1558,7 +1564,6 @@ function ShotWorkbench({
     onError: (err) => toast.error(err.message),
   });
 
-  const previewImage = activeShot?.cameraDiagramUrl || activeShot?.storyboardSketchUrl;
   const referenceTags = selectedAssets.map(assetTag);
   if (activeShot?.storyboardSketchUrl) referenceTags.push(`@分镜EP${activeShot.episodeNumber}-${activeShot.shotNumber}`);
   if (activeShot?.cameraDiagramUrl) referenceTags.push(`@机位EP${activeShot.episodeNumber}-${activeShot.shotNumber}`);
@@ -1699,7 +1704,7 @@ function ShotWorkbench({
           {segments.length === 0 && <Empty title="还没有分镜。先到“剧本分集”生成分镜设计。" icon={<Clapperboard size={34} />} />}
         </div>
       </aside>
-      <section style={{ minHeight: 0, display: "grid", gridTemplateRows: compact ? "auto auto auto" : videoMode ? "auto 150px minmax(0, 1fr)" : "auto 160px 1fr", gap: 12 }}>
+      <section style={{ minHeight: 0, display: "grid", gridTemplateRows: compact ? "auto auto" : videoMode ? "auto minmax(0, 1fr)" : "auto 132px minmax(0, 1fr)", gap: 12 }}>
         <div style={card({ padding: 14 })}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
             <div>
@@ -1714,11 +1719,11 @@ function ShotWorkbench({
               {!videoMode && (
                 <>
                   <Button variant="outline" disabled={!activeShot || generateStoryboard.isPending} onClick={() => activeShot && generateStoryboard.mutate({ shotId: activeShot.id, imageEngine: "image2", addToAssetLibrary: false })} style={{ borderColor: C.line, borderRadius: 8 }}>
-                    {generateStoryboard.isPending ? <Loader2 className="animate-spin" size={14} /> : <ImageIcon size={14} />}
+                    {storyboardTargetId === activeShot?.id ? <Loader2 className="animate-spin" size={14} /> : <ImageIcon size={14} />}
                     分镜草图
                   </Button>
                   <Button variant="outline" disabled={!activeShot || generateDiagram.isPending} onClick={() => activeShot && generateDiagram.mutate({ shotId: activeShot.id, imageEngine: "image2", addToAssetLibrary: false })} style={{ borderColor: C.line, borderRadius: 8 }}>
-                    {generateDiagram.isPending ? <Loader2 className="animate-spin" size={14} /> : <Camera size={14} />}
+                    {diagramTargetId === activeShot?.id ? <Loader2 className="animate-spin" size={14} /> : <Camera size={14} />}
                     机位图
                   </Button>
                 </>
@@ -1741,18 +1746,21 @@ function ShotWorkbench({
             </div>
           )}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.max(1, currentSegment?.shots.length ?? 1)}, minmax(120px, 1fr))`, gap: 10, minHeight: 0 }}>
+        {!videoMode && <div style={{ display: "flex", gap: 10, minHeight: 0, overflowX: "auto", paddingBottom: 2 }}>
           {(currentSegment?.shots ?? []).map((shot) => (
-            <button key={shot.id} onClick={() => setActiveShotId(shot.id)} style={{ ...card({ padding: 8, cursor: "pointer", textAlign: "left", borderColor: activeShot?.id === shot.id ? "#d8ccff" : C.line }) }}>
-              <div style={{ height: 82, background: C.panelSoft, borderRadius: 7, overflow: "hidden", display: "grid", placeItems: "center" }}>
-                {shot.storyboardSketchUrl ? <img src={shot.storyboardSketchUrl} alt="分镜草图" style={{ width: "100%", height: "100%", objectFit: "cover" }} /> : <ImageIcon size={22} style={{ color: C.dim }} />}
+            <button key={shot.id} onClick={() => setActiveShotId(shot.id)} style={{ ...card({ padding: 10, cursor: "pointer", textAlign: "left", borderColor: activeShot?.id === shot.id ? "#d8ccff" : C.line, flex: "0 0 180px", background: activeShot?.id === shot.id ? C.purpleSoft : C.panel }) }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 900 }}>分镜 {shot.shotNumber}</div>
+                <div style={{ display: "flex", gap: 4 }}>
+                  <span style={{ ...pill(Boolean(shot.storyboardSketchUrl)), padding: "4px 6px" }}>草图</span>
+                  <span style={{ ...pill(Boolean(shot.cameraDiagramUrl)), padding: "4px 6px" }}>机位</span>
+                </div>
               </div>
-              <div style={{ fontSize: 12, fontWeight: 900, marginTop: 7 }}>分镜 {shot.shotNumber}</div>
               <div style={{ ...tinyLabel(C.dim), marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{shot.visualDescription || "暂无描述"}</div>
             </button>
           ))}
           {!currentSegment && <Empty title="暂无视频段" icon={<GalleryHorizontal size={34} />} />}
-        </div>
+        </div>}
         <div style={{ minHeight: 0, display: "grid", gridTemplateColumns: compact || videoMode ? "1fr" : "1fr 1fr", gap: 12 }}>
           {!videoMode && (
             <section style={card({ padding: 14, minHeight: 0, display: "grid", gridTemplateRows: "auto 1fr", gap: 10 })}>
@@ -1771,20 +1779,8 @@ function ShotWorkbench({
               ) : <Empty title="选择一个视频段或分镜" icon={<FileText size={34} />} />}
             </section>
           )}
-          <section style={card({ padding: 0, minHeight: 0, display: "grid", gridTemplateRows: videoMode ? "minmax(160px, 0.65fr) minmax(300px, 1fr)" : "1fr", overflow: "hidden" })}>
-            <div style={{ background: C.panelSoft, display: "grid", placeItems: "center", overflow: "hidden" }}>
-              {currentSegment?.videoUrl || segmentLead?.videoUrl ? (
-                <video src={currentSegment?.videoUrl || segmentLead?.videoUrl || ""} controls style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-              ) : previewImage ? (
-                <img src={previewImage} alt="预览" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-              ) : (
-                <div style={{ textAlign: "center", color: C.dim }}>
-                  <Play size={36} />
-                  <div style={{ marginTop: 8, fontSize: 12 }}>视频预览 / 分镜图 / 机位图</div>
-                </div>
-              )}
-            </div>
-            {videoMode && (
+          {videoMode ? (
+            <section style={card({ padding: 0, minHeight: 0, overflow: "hidden" })}>
               <SeedanceComposer
                 disabled={!project || !currentSegment}
                 prompt={segmentPrompt}
@@ -1826,34 +1822,67 @@ function ShotWorkbench({
                   const aspectRatio = project?.aspectRatio === "landscape" ? "16:9" : "9:16";
                   if (typeof currentSegment.id === "number") {
                     generateVideoSegment.mutate({
-                    segmentId: currentSegment.id,
-                    prompt: segmentPrompt,
-                    referenceAssetIds: selectedAssetIds,
-                    referenceImageUrls: referenceUrls,
-                    referenceVideoUrls,
-                    referenceAudioUrls,
-                    duration,
-                    aspectRatio,
-                    generateAudio,
-                    watermark,
-                  });
-                } else {
-                  generateVideo.mutate({
-                    shotId: segmentLead.id,
-                    prompt: segmentPrompt,
-                    referenceImageUrls: referenceUrls,
-                    referenceVideoUrls,
-                    referenceAudioUrls,
-                    duration,
-                    aspectRatio,
-                    generateAudio,
-                    watermark,
-                  });
-                }
+                      segmentId: currentSegment.id,
+                      prompt: segmentPrompt,
+                      referenceAssetIds: selectedAssetIds,
+                      referenceImageUrls: referenceUrls,
+                      referenceVideoUrls,
+                      referenceAudioUrls,
+                      duration,
+                      aspectRatio,
+                      generateAudio,
+                      watermark,
+                    });
+                  } else {
+                    generateVideo.mutate({
+                      shotId: segmentLead.id,
+                      prompt: segmentPrompt,
+                      referenceImageUrls: referenceUrls,
+                      referenceVideoUrls,
+                      referenceAudioUrls,
+                      duration,
+                      aspectRatio,
+                      generateAudio,
+                      watermark,
+                    });
+                  }
                 }}
               />
-            )}
-          </section>
+            </section>
+          ) : (
+            <section style={card({ padding: 14, minHeight: 0, display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", gap: 10, overflow: "hidden" })}>
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 900 }}>分镜图 / 机位图</div>
+                <div style={tinyLabel()}>当前只加载选中分镜的大图，避免整段图片同时加载。</div>
+              </div>
+              <div style={{ minHeight: 0, display: "grid", gridTemplateColumns: compact ? "1fr" : "1fr 1fr", gap: 10, overflow: compact ? "auto" : "hidden" }}>
+                <VisualReviewCard
+                  title="分镜草图"
+                  url={activeShot?.storyboardSketchUrl}
+                  prompt={activeShot?.storyboardPrompt}
+                  icon={<ImageIcon size={28} />}
+                  isGenerating={storyboardTargetId === activeShot?.id}
+                  generateLabel={activeShot?.storyboardSketchUrl ? "重新生成" : "生成草图"}
+                  onGenerate={() => activeShot && generateStoryboard.mutate({ shotId: activeShot.id, imageEngine: "image2", addToAssetLibrary: false })}
+                  canAdd={Boolean(activeShot?.storyboardSketchUrl)}
+                  onAdd={() => activeShot && addVisual.mutate({ shotId: activeShot.id, kind: "storyboard" })}
+                  isAdding={addVisual.isPending}
+                />
+                <VisualReviewCard
+                  title="人物调度与机位图"
+                  url={activeShot?.cameraDiagramUrl}
+                  prompt={activeShot?.cameraDiagramPrompt}
+                  icon={<Camera size={28} />}
+                  isGenerating={diagramTargetId === activeShot?.id}
+                  generateLabel={activeShot?.cameraDiagramUrl ? "重新生成" : "生成机位"}
+                  onGenerate={() => activeShot && generateDiagram.mutate({ shotId: activeShot.id, imageEngine: "image2", addToAssetLibrary: false })}
+                  canAdd={Boolean(activeShot?.cameraDiagramUrl)}
+                  onAdd={() => activeShot && addVisual.mutate({ shotId: activeShot.id, kind: "camera_diagram" })}
+                  isAdding={addVisual.isPending}
+                />
+              </div>
+            </section>
+          )}
         </div>
       </section>
       {!videoMode && <aside style={card({ padding: 14, minHeight: 0, display: "grid", gridTemplateRows: "auto auto 1fr auto", gap: 12 })}>
@@ -1878,7 +1907,7 @@ function ShotWorkbench({
                 style={{ ...card({ padding: 8, display: "grid", gridTemplateColumns: "46px 1fr", gap: 10, cursor: "pointer", textAlign: "left", borderColor: selected ? "#d8ccff" : C.line, background: selected ? C.purpleSoft : C.panel }) }}
               >
                 <div style={{ width: 46, height: 46, borderRadius: 7, background: C.panelSoft, overflow: "hidden", display: "grid", placeItems: "center" }}>
-                  <img src={assetImage(asset)!} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  <img loading="lazy" decoding="async" src={assetImage(asset)!} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 12, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.name}</div>
@@ -1897,6 +1926,62 @@ function ShotWorkbench({
           </Button>
         </div>
       </aside>}
+    </div>
+  );
+}
+
+function VisualReviewCard({
+  title,
+  url,
+  prompt,
+  icon,
+  isGenerating,
+  generateLabel,
+  onGenerate,
+  canAdd,
+  onAdd,
+  isAdding,
+}: {
+  title: string;
+  url?: string | null;
+  prompt?: string | null;
+  icon: ReactNode;
+  isGenerating: boolean;
+  generateLabel: string;
+  onGenerate: () => void;
+  canAdd: boolean;
+  onAdd: () => void;
+  isAdding: boolean;
+}) {
+  return (
+    <div style={{ minHeight: 0, display: "grid", gridTemplateRows: "auto minmax(180px, 1fr) auto", gap: 8, overflow: "hidden" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+        <div style={{ fontSize: 13, fontWeight: 900 }}>{title}</div>
+        <span style={pill(Boolean(url))}>{url ? "已生成" : "未生成"}</span>
+      </div>
+      <div style={{ minHeight: 0, background: C.panelSoft, border: `1px solid ${C.line}`, borderRadius: 8, overflow: "hidden", display: "grid", placeItems: "center" }}>
+        {url ? (
+          <img loading="lazy" decoding="async" src={url} alt={title} style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+        ) : (
+          <div style={{ color: C.dim, textAlign: "center" }}>
+            {icon}
+            <div style={{ ...tinyLabel(), marginTop: 8 }}>{title}将在这里预览</div>
+          </div>
+        )}
+      </div>
+      <div style={{ display: "grid", gap: 8 }}>
+        {prompt && <div style={{ ...tinyLabel(C.sub), maxHeight: 58, overflow: "auto", lineHeight: 1.55, background: C.panelSoft, borderRadius: 8, padding: 8 }}>{prompt}</div>}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <Button variant="outline" disabled={isGenerating} onClick={onGenerate} style={{ borderColor: C.line, borderRadius: 8 }}>
+            {isGenerating ? <Loader2 className="animate-spin" size={14} /> : <Wand2 size={14} />}
+            {generateLabel}
+          </Button>
+          <Button variant="outline" disabled={!canAdd || isAdding} onClick={onAdd} style={{ borderColor: C.line, borderRadius: 8 }}>
+            {isAdding ? <Loader2 className="animate-spin" size={14} /> : <Plus size={14} />}
+            加入资产库
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2011,7 +2096,7 @@ function SeedanceComposer({
                 onClick={() => onToggleAsset(asset.id)}
                 style={{ ...card({ padding: 8, display: "grid", gridTemplateColumns: "44px 1fr auto", gap: 9, alignItems: "center", cursor: "pointer", textAlign: "left", borderColor: "#d8ccff", background: C.purpleSoft }) }}
               >
-                <img src={assetImage(asset)!} alt={asset.name} style={{ width: 44, height: 44, borderRadius: 7, objectFit: "cover" }} />
+                <img loading="lazy" decoding="async" src={assetImage(asset)!} alt={asset.name} style={{ width: 44, height: 44, borderRadius: 7, objectFit: "cover" }} />
                 <div style={{ minWidth: 0 }}>
                   <div style={{ fontSize: 12, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.name}</div>
                   <div style={{ ...tinyLabel(C.purple), marginTop: 3 }}>{assetTag(asset)}</div>
@@ -2043,7 +2128,7 @@ function SeedanceComposer({
                         style={{ ...card({ padding: 7, display: "grid", gridTemplateColumns: "38px 1fr", gap: 8, alignItems: "center", textAlign: "left", cursor: "pointer", borderColor: selected ? "#d8ccff" : C.line, background: selected ? C.purpleSoft : C.panel }) }}
                       >
                         <div style={{ width: 38, height: 38, borderRadius: 7, background: "#fff", overflow: "hidden", display: "grid", placeItems: "center" }}>
-                          <img src={assetImage(asset)!} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                          <img loading="lazy" decoding="async" src={assetImage(asset)!} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                         </div>
                         <div style={{ minWidth: 0 }}>
                           <div style={{ fontSize: 12, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.name}</div>
