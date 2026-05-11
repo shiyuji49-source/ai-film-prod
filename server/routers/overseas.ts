@@ -135,16 +135,24 @@ const premiumVideoSegmentVideoSchema = z.object({
   prompt: z.string().optional(),
   referenceAssetIds: z.array(z.number().int()).max(9).optional(),
   referenceImageUrls: z.array(z.string().url()).max(9).optional(),
+  referenceVideoUrls: z.array(z.string().url()).max(3).optional(),
+  referenceAudioUrls: z.array(z.string().url()).max(3).optional(),
   duration: z.number().int().min(8).max(15).default(15),
   aspectRatio: z.enum(["16:9", "9:16"]).optional(),
+  generateAudio: z.boolean().optional(),
+  watermark: z.boolean().optional(),
 });
 
 const premiumVideoSchema = z.object({
   shotId: z.number().int(),
   prompt: z.string().optional(),
   referenceImageUrls: z.array(z.string().url()).max(9).optional(),
+  referenceVideoUrls: z.array(z.string().url()).max(3).optional(),
+  referenceAudioUrls: z.array(z.string().url()).max(3).optional(),
   duration: z.number().int().min(4).max(15).default(15),
   aspectRatio: z.enum(["16:9", "9:16"]).optional(),
+  generateAudio: z.boolean().optional(),
+  watermark: z.boolean().optional(),
 });
 
 const shotVisualAssetSchema = z.object({
@@ -3274,8 +3282,12 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
           prompt,
           engine: "seedance-2.0",
           referenceImageUrls: referenceImageUrls.slice(0, 9),
+          referenceVideoUrls: input.referenceVideoUrls?.slice(0, 3),
+          referenceAudioUrls: input.referenceAudioUrls?.slice(0, 3),
           duration,
           aspectRatio,
+          generateAudio: input.generateAudio,
+          watermark: input.watermark,
           s3KeyPrefix: `premium-video-segments/${ctx.user.id}/${segment.projectId}`,
         });
 
@@ -3363,8 +3375,12 @@ ${input.context ? `\n额外上下文：${input.context}` : ""}
           prompt,
           engine: "seedance-2.0",
           referenceImageUrls: referenceImageUrls?.slice(0, 9),
+          referenceVideoUrls: input.referenceVideoUrls?.slice(0, 3),
+          referenceAudioUrls: input.referenceAudioUrls?.slice(0, 3),
           duration: input.duration,
           aspectRatio,
+          generateAudio: input.generateAudio,
+          watermark: input.watermark,
           s3KeyPrefix: `premium-videos/${ctx.user.id}/${shot.projectId}`,
         });
 

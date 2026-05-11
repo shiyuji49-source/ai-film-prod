@@ -67,6 +67,10 @@ export interface GenerateVideoOptions {
   referenceVideoUrls?: string[];
   /** 参考音频 URL 列表（最多 3 段，对应 @Audio1-3） */
   referenceAudioUrls?: string[];
+  /** 是否生成/保留音频（Seedance 2.0） */
+  generateAudio?: boolean;
+  /** 是否添加平台水印（Seedance 2.0） */
+  watermark?: boolean;
 
   // === 跑量剧模式（Seedance 1.5 Pro 首尾帧图生视频）===
   /** 首帧图 URL（跑量剧专用） */
@@ -232,10 +236,10 @@ async function _generateSeedance2(options: GenerateVideoOptions): Promise<{ rawU
           body: JSON.stringify({
             model,
             content,
-            generate_audio: Boolean(options.referenceAudioUrls?.length),
+            generate_audio: options.generateAudio ?? Boolean(options.referenceAudioUrls?.length),
             ratio: aspectRatio,
             duration: Math.max(4, Math.min(15, duration ?? 5)),
-            watermark: false,
+            watermark: options.watermark ?? false,
           }),
         });
 

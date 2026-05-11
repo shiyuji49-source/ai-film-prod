@@ -27,6 +27,7 @@ import {
   Layers,
   Loader2,
   Lock,
+  Music2,
   Play,
   Plus,
   RefreshCw,
@@ -34,9 +35,11 @@ import {
   Search,
   Send,
   Settings2,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   Upload,
+  Video,
   Wand2,
 } from "lucide-react";
 
@@ -235,6 +238,14 @@ function copy(text?: string | null) {
   if (!text) return;
   navigator.clipboard.writeText(text);
   toast.success("已复制");
+}
+
+function parseUrlList(value: string, limit: number) {
+  return value
+    .split(/[\n,，\s]+/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, limit);
 }
 
 function useViewportWidth() {
@@ -1457,6 +1468,10 @@ function ShotWorkbench({
   const [segmentPrompt, setSegmentPrompt] = useState("");
   const [duration, setDuration] = useState(15);
   const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+  const [referenceVideoText, setReferenceVideoText] = useState("");
+  const [referenceAudioText, setReferenceAudioText] = useState("");
+  const [generateAudio, setGenerateAudio] = useState(false);
+  const [watermark, setWatermark] = useState(false);
 
   const { data: assetData = [] } = trpc.overseas.listAssets.useQuery(
     { projectId: project?.id ?? 0 },
@@ -1477,6 +1492,10 @@ function ShotWorkbench({
       setDuration(currentSegment.duration);
       setSegmentPrompt(currentSegment.prompt ?? currentSegment.shots[0]?.videoPrompt ?? "");
       setSelectedAssetIds(currentSegment.referenceAssetIds ?? []);
+      setReferenceVideoText("");
+      setReferenceAudioText("");
+      setGenerateAudio(false);
+      setWatermark(false);
     }
   }, [currentSegment?.id]);
 
@@ -1561,6 +1580,8 @@ function ShotWorkbench({
       referenceAssetIds: selectedAssetIds,
     });
   };
+  const referenceVideoUrls = parseUrlList(referenceVideoText, 3);
+  const referenceAudioUrls = parseUrlList(referenceAudioText, 3);
   const runNextSegmentAction = () => {
     if (!currentSegment || !activeShot || !project) return;
     if (!videoMode && (segmentStats?.nextAction === "asset" || segmentStats?.nextAction === "prompt" || segmentStats?.nextAction === "video")) {
@@ -1599,16 +1620,24 @@ function ShotWorkbench({
           prompt: segmentPrompt,
           referenceAssetIds: selectedAssetIds,
           referenceImageUrls: referenceUrls,
+          referenceVideoUrls,
+          referenceAudioUrls,
           duration,
           aspectRatio,
+          generateAudio,
+          watermark,
         });
       } else {
         generateVideo.mutate({
           shotId: segmentLead.id,
           prompt: segmentPrompt,
           referenceImageUrls: referenceUrls,
+          referenceVideoUrls,
+          referenceAudioUrls,
           duration,
           aspectRatio,
+          generateAudio,
+          watermark,
         });
       }
     }
@@ -1770,6 +1799,14 @@ function ShotWorkbench({
                 onAssetPickerOpen={setAssetPickerOpen}
                 onToggleAsset={toggleAsset}
                 onClearAssets={() => setSelectedAssetIds([])}
+                referenceVideoText={referenceVideoText}
+                onReferenceVideoText={setReferenceVideoText}
+                referenceAudioText={referenceAudioText}
+                onReferenceAudioText={setReferenceAudioText}
+                generateAudio={generateAudio}
+                onGenerateAudio={setGenerateAudio}
+                watermark={watermark}
+                onWatermark={setWatermark}
                 isPrompting={generateSegmentPrompt.isPending}
                 isSaving={updateSegment.isPending}
                 isGenerating={generateVideoSegment.isPending || generateVideo.isPending}
@@ -1789,22 +1826,30 @@ function ShotWorkbench({
                   const aspectRatio = project?.aspectRatio === "landscape" ? "16:9" : "9:16";
                   if (typeof currentSegment.id === "number") {
                     generateVideoSegment.mutate({
-                      segmentId: currentSegment.id,
-                      prompt: segmentPrompt,
-                      referenceAssetIds: selectedAssetIds,
-                      referenceImageUrls: referenceUrls,
-                      duration,
-                      aspectRatio,
-                    });
-                  } else {
-                    generateVideo.mutate({
-                      shotId: segmentLead.id,
-                      prompt: segmentPrompt,
-                      referenceImageUrls: referenceUrls,
-                      duration,
-                      aspectRatio,
-                    });
-                  }
+                    segmentId: currentSegment.id,
+                    prompt: segmentPrompt,
+                    referenceAssetIds: selectedAssetIds,
+                    referenceImageUrls: referenceUrls,
+                    referenceVideoUrls,
+                    referenceAudioUrls,
+                    duration,
+                    aspectRatio,
+                    generateAudio,
+                    watermark,
+                  });
+                } else {
+                  generateVideo.mutate({
+                    shotId: segmentLead.id,
+                    prompt: segmentPrompt,
+                    referenceImageUrls: referenceUrls,
+                    referenceVideoUrls,
+                    referenceAudioUrls,
+                    duration,
+                    aspectRatio,
+                    generateAudio,
+                    watermark,
+                  });
+                }
                 }}
               />
             )}
@@ -1870,6 +1915,14 @@ function SeedanceComposer({
   onAssetPickerOpen,
   onToggleAsset,
   onClearAssets,
+  referenceVideoText,
+  onReferenceVideoText,
+  referenceAudioText,
+  onReferenceAudioText,
+  generateAudio,
+  onGenerateAudio,
+  watermark,
+  onWatermark,
   isPrompting,
   isSaving,
   isGenerating,
@@ -1890,6 +1943,14 @@ function SeedanceComposer({
   onAssetPickerOpen: (open: boolean) => void;
   onToggleAsset: (assetId: number) => void;
   onClearAssets: () => void;
+  referenceVideoText: string;
+  onReferenceVideoText: (text: string) => void;
+  referenceAudioText: string;
+  onReferenceAudioText: (text: string) => void;
+  generateAudio: boolean;
+  onGenerateAudio: (enabled: boolean) => void;
+  watermark: boolean;
+  onWatermark: (enabled: boolean) => void;
   isPrompting: boolean;
   isSaving: boolean;
   isGenerating: boolean;
@@ -1897,123 +1958,161 @@ function SeedanceComposer({
   onGeneratePrompt: () => void;
   onGenerateVideo: () => void;
 }) {
-  const compact = useCompactLayout(720);
+  const compact = useCompactLayout(900);
   const [assetFilter, setAssetFilter] = useState<AssetType | "all">("all");
+  const [mediaOpen, setMediaOpen] = useState(false);
   const filteredAssets = availableAssets.filter((asset) => assetFilter === "all" || asset.type === assetFilter);
+  const videoUrlCount = parseUrlList(referenceVideoText, 3).length;
+  const audioUrlCount = parseUrlList(referenceAudioText, 3).length;
+  const refTotal = selectedAssets.length + videoUrlCount + audioUrlCount;
 
   return (
-    <div style={{ borderTop: `1px solid ${C.line}`, padding: 12, background: "#fff", display: "grid", gap: 9, maxHeight: compact ? undefined : 430, overflowY: "auto", minHeight: 0 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "center" }}>
-        <div style={{ display: "flex", gap: 8, overflowX: "auto", minWidth: 0, paddingBottom: 2 }}>
-          {selectedAssets.map((asset) => (
-            <button
-              key={asset.id}
-              onClick={() => onToggleAsset(asset.id)}
-              style={{
-                border: `1px solid ${C.line}`,
-                background: C.panel,
-                borderRadius: 999,
-                height: 34,
-                padding: "4px 9px 4px 4px",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 7,
-                cursor: "pointer",
-                flex: "0 0 auto",
-                maxWidth: 170,
-              }}
-            >
-              <img src={assetImage(asset)!} alt={asset.name} style={{ width: 26, height: 26, borderRadius: 999, objectFit: "cover" }} />
-              <span style={{ fontSize: 12, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{assetTag(asset)}</span>
-            </button>
-          ))}
-          {selectedAssets.length === 0 && (
-            <button onClick={() => onAssetPickerOpen(true)} style={{ ...pill(), height: 34, cursor: "pointer" }}>
-              <AtSign size={13} /> 添加人物、场景或分镜参考
-            </button>
-          )}
-          {tags.filter((tag) => !selectedAssets.some((asset) => assetTag(asset) === tag)).slice(0, 4).map((tag) => <span key={tag} style={{ ...pill(true), height: 34 }}>{tag}</span>)}
+    <div style={{ borderTop: `1px solid ${C.line}`, background: "#fff", minHeight: 0, height: "100%", display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", overflow: "hidden" }}>
+      <div style={{ padding: "10px 12px", borderBottom: `1px solid ${C.line}`, display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <span style={{ ...pill(true), height: 30 }}><Sparkles size={13} /> Seedance 2.0</span>
+        <span style={{ ...pill(refTotal > 0), height: 30 }}><AtSign size={13} /> 多参 {refTotal}/15</span>
+        <span style={{ ...pill(true), height: 30 }}><ImageIcon size={13} /> 图片 {selectedAssets.length}/9</span>
+        <button onClick={() => setMediaOpen(!mediaOpen)} style={{ ...pill(mediaOpen || videoUrlCount + audioUrlCount > 0), height: 30, cursor: "pointer" }}>
+          <Video size={13} /> 影音 {videoUrlCount + audioUrlCount}/6
+        </button>
+        <button onClick={() => onGenerateAudio(!generateAudio)} style={{ ...pill(generateAudio), height: 30, cursor: "pointer" }}>
+          <Music2 size={13} /> 声音
+        </button>
+        <button onClick={() => onWatermark(!watermark)} style={{ ...pill(watermark), height: 30, cursor: "pointer" }}>
+          <Check size={13} /> 水印
+        </button>
+        <div style={{ marginLeft: compact ? 0 : "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          <SlidersHorizontal size={14} style={{ color: C.dim }} />
+          <Select value={String(duration)} onValueChange={(value) => onDuration(Number(value))}>
+            <SelectTrigger style={{ ...field(), width: 96, height: 32, fontSize: 12 }}><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {[8, 10, 11, 12, 15].map((value) => <SelectItem key={value} value={String(value)}>{value}s</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
-        {selectedAssets.length > 0 && (
-          <button onClick={onClearAssets} style={{ ...pill(), height: 30, cursor: "pointer" }}>清空引用</button>
-        )}
       </div>
-      <Textarea
-        value={prompt}
-        onChange={(event) => onPrompt(event.target.value)}
-        placeholder="描述这个视频段，或生成 15 秒 Seedance 2.0 提示词..."
-        rows={8}
-        style={{ ...field(), resize: "none", lineHeight: 1.6, minHeight: compact ? 180 : 220, maxHeight: compact ? 220 : 260, overflowY: "auto" }}
-      />
-      {assetPickerOpen && (
-        <div style={card({ padding: 10, background: C.panelSoft })}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 8 }}>
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {(["all", "character", "scene", "costume", "prop", "storyboard", "camera_diagram", "custom"] as Array<AssetType | "all">).map((type) => (
-                <button key={type} onClick={() => setAssetFilter(type)} style={{ ...pill(assetFilter === type), cursor: "pointer" }}>{assetLabel[type]}</button>
-              ))}
+
+      <div style={{ minHeight: 0, padding: 12, display: "grid", gridTemplateColumns: compact ? "1fr" : "300px minmax(0, 1fr)", gap: 12, overflow: compact ? "auto" : "hidden" }}>
+        <section style={{ minHeight: 0, display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 10, overflow: "hidden" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 900 }}>参考素材</div>
+              <div style={tinyLabel()}>图片锁定人物、场景、分镜和机位</div>
             </div>
-            <button onClick={() => onAssetPickerOpen(false)} style={{ ...pill(), cursor: "pointer" }}>收起</button>
+            <button onClick={() => onAssetPickerOpen(!assetPickerOpen)} style={{ ...pill(assetPickerOpen), cursor: "pointer" }}>
+              <AtSign size={13} /> 选择
+            </button>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(132px, 1fr))", gap: 8, maxHeight: 154, overflow: "auto" }}>
-            {filteredAssets.map((asset) => {
-              const selected = selectedAssetIds.includes(asset.id);
-              return (
-                <button
-                  key={asset.id}
-                  onClick={() => onToggleAsset(asset.id)}
-                  style={{
-                    ...card({
-                      padding: 7,
-                      display: "grid",
-                      gridTemplateColumns: "38px 1fr",
-                      gap: 8,
-                      alignItems: "center",
-                      textAlign: "left",
-                      cursor: "pointer",
-                      borderColor: selected ? "#d8ccff" : C.line,
-                      background: selected ? C.purpleSoft : C.panel,
-                    }),
-                  }}
-                >
-                  <div style={{ width: 38, height: 38, borderRadius: 7, background: "#fff", overflow: "hidden", display: "grid", placeItems: "center" }}>
-                    <img src={assetImage(asset)!} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  </div>
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontSize: 12, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.name}</div>
-                    <div style={{ ...tinyLabel(selected ? C.purple : C.dim), marginTop: 3 }}>{assetLabel[asset.type]}</div>
-                  </div>
-                </button>
-              );
-            })}
-            {filteredAssets.length === 0 && <div style={{ ...tinyLabel(), padding: 10 }}>该分类暂无可引用图片。</div>}
+
+          <div style={{ minHeight: 0, overflow: "auto", display: "grid", alignContent: "start", gap: 8 }}>
+            {selectedAssets.map((asset) => (
+              <button
+                key={asset.id}
+                onClick={() => onToggleAsset(asset.id)}
+                style={{ ...card({ padding: 8, display: "grid", gridTemplateColumns: "44px 1fr auto", gap: 9, alignItems: "center", cursor: "pointer", textAlign: "left", borderColor: "#d8ccff", background: C.purpleSoft }) }}
+              >
+                <img src={assetImage(asset)!} alt={asset.name} style={{ width: 44, height: 44, borderRadius: 7, objectFit: "cover" }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 12, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.name}</div>
+                  <div style={{ ...tinyLabel(C.purple), marginTop: 3 }}>{assetTag(asset)}</div>
+                </div>
+                <Check size={14} style={{ color: C.purple }} />
+              </button>
+            ))}
+            {selectedAssets.length === 0 && (
+              <button onClick={() => onAssetPickerOpen(true)} style={{ ...card({ padding: 12, cursor: "pointer", textAlign: "left", borderStyle: "dashed" }) }}>
+                <div style={{ fontSize: 12, fontWeight: 900 }}>添加固定参考</div>
+                <div style={{ ...tinyLabel(), marginTop: 4 }}>人物、场景、分镜草图、机位图</div>
+              </button>
+            )}
+
+            {assetPickerOpen && (
+              <div style={card({ padding: 10, background: C.panelSoft })}>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+                  {(["all", "character", "scene", "costume", "prop", "storyboard", "camera_diagram", "custom"] as Array<AssetType | "all">).map((type) => (
+                    <button key={type} onClick={() => setAssetFilter(type)} style={{ ...pill(assetFilter === type), cursor: "pointer" }}>{assetLabel[type]}</button>
+                  ))}
+                </div>
+                <div style={{ display: "grid", gap: 7, maxHeight: compact ? 260 : 210, overflow: "auto" }}>
+                  {filteredAssets.map((asset) => {
+                    const selected = selectedAssetIds.includes(asset.id);
+                    return (
+                      <button
+                        key={asset.id}
+                        onClick={() => onToggleAsset(asset.id)}
+                        style={{ ...card({ padding: 7, display: "grid", gridTemplateColumns: "38px 1fr", gap: 8, alignItems: "center", textAlign: "left", cursor: "pointer", borderColor: selected ? "#d8ccff" : C.line, background: selected ? C.purpleSoft : C.panel }) }}
+                      >
+                        <div style={{ width: 38, height: 38, borderRadius: 7, background: "#fff", overflow: "hidden", display: "grid", placeItems: "center" }}>
+                          <img src={assetImage(asset)!} alt={asset.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        </div>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: 12, fontWeight: 900, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{asset.name}</div>
+                          <div style={{ ...tinyLabel(selected ? C.purple : C.dim), marginTop: 3 }}>{assetLabel[asset.type]}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                  {filteredAssets.length === 0 && <div style={{ ...tinyLabel(), padding: 10 }}>该分类暂无可引用图片。</div>}
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      )}
-      <div style={{ position: "sticky", bottom: -12, zIndex: 2, background: "#fff", borderTop: `1px solid ${C.line}`, margin: "0 -12px -12px", padding: "10px 12px 12px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", boxShadow: "0 -8px 18px rgba(20,20,20,0.04)" }}>
-        <button style={pill()}><Plus size={13} /></button>
-        <button style={pill(true)}><Film size={13} /> 视频 2.0</button>
-        <button style={pill(true)}><Sparkles size={13} /> Seedance 2.0</button>
-        <button onClick={() => onAssetPickerOpen(!assetPickerOpen)} style={{ ...pill(assetPickerOpen), cursor: "pointer" }}><AtSign size={13} /> 资产</button>
-        <button style={pill()}><ImageIcon size={13} /> 分镜图</button>
-        <button style={pill()}><Camera size={13} /> 机位图</button>
-        <Select value={String(duration)} onValueChange={(value) => onDuration(Number(value))}>
-          <SelectTrigger style={{ ...field(), width: 92, height: 30, fontSize: 12 }}><SelectValue /></SelectTrigger>
-          <SelectContent>
-            {[8, 10, 12, 15].map((value) => <SelectItem key={value} value={String(value)}>{value}s</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <Button variant="outline" disabled={disabled || isSaving} onClick={onSaveDraft} style={{ borderColor: C.line, borderRadius: 999, height: 32 }}>
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button variant="outline" disabled={selectedAssets.length === 0} onClick={onClearAssets} style={{ borderColor: C.line, borderRadius: 8, height: 34, flex: 1 }}>
+              <Trash2 size={14} /> 清空
+            </Button>
+            <Button variant="outline" onClick={() => setMediaOpen(!mediaOpen)} style={{ borderColor: C.line, borderRadius: 8, height: 34, flex: 1 }}>
+              <Plus size={14} /> 影音参考
+            </Button>
+          </div>
+        </section>
+
+        <section style={{ minHeight: compact ? 360 : 0, display: "grid", gridTemplateRows: mediaOpen ? "auto minmax(0, 1fr)" : "minmax(0, 1fr)", gap: 10, overflow: "hidden" }}>
+          {mediaOpen && (
+            <div style={{ display: "grid", gridTemplateColumns: compact ? "1fr" : "1fr 1fr", gap: 10 }}>
+              <div>
+                <div style={{ ...tinyLabel(C.text), fontWeight: 900, marginBottom: 5 }}>参考视频 URL</div>
+                <Textarea value={referenceVideoText} onChange={(event) => onReferenceVideoText(event.target.value)} rows={2} placeholder="每行一个视频链接，最多3个" style={{ ...field(), resize: "none", minHeight: 68, lineHeight: 1.5 }} />
+              </div>
+              <div>
+                <div style={{ ...tinyLabel(C.text), fontWeight: 900, marginBottom: 5 }}>参考音频 URL</div>
+                <Textarea value={referenceAudioText} onChange={(event) => onReferenceAudioText(event.target.value)} rows={2} placeholder="每行一个音频链接，最多3个" style={{ ...field(), resize: "none", minHeight: 68, lineHeight: 1.5 }} />
+              </div>
+            </div>
+          )}
+          <div style={{ minHeight: 0, display: "grid", gridTemplateRows: "auto minmax(0, 1fr)", gap: 8 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+              <div>
+                <div style={{ fontSize: 13, fontWeight: 900 }}>15秒视频提示词</div>
+                <div style={tinyLabel()}>{tags.length ? tags.slice(0, 4).join("  ") : "固定资产参考会随生成请求一起提交"}</div>
+              </div>
+              <Button variant="outline" disabled={!prompt.trim()} onClick={() => copy(prompt)} style={{ borderColor: C.line, borderRadius: 8, height: 32 }}>
+                <Copy size={14} /> 复制
+              </Button>
+            </div>
+            <Textarea
+              value={prompt}
+              onChange={(event) => onPrompt(event.target.value)}
+              placeholder="描述这个视频段，或点击下方生成 15 秒 Seedance 2.0 提示词..."
+              style={{ ...field(), resize: "none", lineHeight: 1.65, minHeight: compact ? 220 : 0, height: "100%", overflowY: "auto" }}
+            />
+          </div>
+        </section>
+      </div>
+
+      <div style={{ borderTop: `1px solid ${C.line}`, padding: "10px 12px", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", boxShadow: "0 -8px 18px rgba(20,20,20,0.04)" }}>
+        <Button variant="outline" disabled={disabled || isSaving} onClick={onSaveDraft} style={{ borderColor: C.line, borderRadius: 999, height: 34 }}>
           {isSaving ? <Loader2 className="animate-spin" size={14} /> : <Save size={14} />}
           保存设置
         </Button>
-        <Button variant="outline" disabled={disabled || isPrompting} onClick={onGeneratePrompt} style={{ borderColor: C.line, borderRadius: 999, height: 32, flex: compact ? "1 1 160px" : undefined }}>
+        <Button variant="outline" disabled={disabled || isPrompting} onClick={onGeneratePrompt} style={{ borderColor: C.line, borderRadius: 999, height: 34, flex: compact ? "1 1 170px" : undefined }}>
           {isPrompting ? <Loader2 className="animate-spin" size={14} /> : <Wand2 size={14} />}
           生成15秒提示词
         </Button>
-        <Button disabled={disabled || !prompt.trim() || isGenerating} onClick={onGenerateVideo} style={{ background: C.ink, color: "#fff", borderRadius: 999, height: 34, marginLeft: compact ? 0 : "auto", flex: compact ? "1 1 120px" : undefined }}>
+        <Button disabled={disabled || !prompt.trim() || isGenerating} onClick={onGenerateVideo} style={{ background: C.ink, color: "#fff", borderRadius: 999, height: 36, marginLeft: compact ? 0 : "auto", flex: compact ? "1 1 130px" : undefined }}>
           {isGenerating ? <Loader2 className="animate-spin" size={14} /> : <ArrowUp size={14} />}
-          生成
+          生成视频
         </Button>
       </div>
     </div>
