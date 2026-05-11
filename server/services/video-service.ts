@@ -200,11 +200,15 @@ async function _generateSeedance2(options: GenerateVideoOptions): Promise<{ rawU
   // 构建多模态 content
   const content: any[] = [{ type: "text", text: prompt }];
   for (const imgUrl of (options.referenceImageUrls ?? []).slice(0, 9)) {
-    content.push({ type: "image_url", image_url: { url: imgUrl } });
+    content.push({ type: "image_url", image_url: { url: imgUrl }, role: "reference_image" });
   }
   // 参考视频（可选）
   for (const vidUrl of (options.referenceVideoUrls ?? []).slice(0, 3)) {
-    content.push({ type: "video_url", video_url: { url: vidUrl } });
+    content.push({ type: "video_url", video_url: { url: vidUrl }, role: "reference_video" });
+  }
+  // 参考音频（可选）
+  for (const audioUrl of (options.referenceAudioUrls ?? []).slice(0, 3)) {
+    content.push({ type: "audio_url", audio_url: { url: audioUrl }, role: "reference_audio" });
   }
 
   const arkBaseUrl = ENV.arkApiUrl || "https://ark.cn-beijing.volces.com/api/v3";
@@ -228,6 +232,7 @@ async function _generateSeedance2(options: GenerateVideoOptions): Promise<{ rawU
           body: JSON.stringify({
             model,
             content,
+            generate_audio: Boolean(options.referenceAudioUrls?.length),
             ratio: aspectRatio,
             duration: Math.max(4, Math.min(15, duration ?? 5)),
             watermark: false,

@@ -10,6 +10,7 @@
     "check": "tsc --noEmit",
     "deploy:volcengine": "bash scripts/deploy-volcengine.sh",
     "check:lq-image2": "node scripts/check-lq-image2.mjs",
+    "check:ark-seedance2": "node scripts/check-ark-seedance2.mjs",
     "smoke:premium": "tsx scripts/smoke-premium-workflow.ts",
     "format": "prettier --write .",
     "test": "vitest run",
