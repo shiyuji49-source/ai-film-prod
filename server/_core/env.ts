@@ -20,7 +20,9 @@ export const ENV = {
   lqUserId: process.env.LQ_USER_ID ?? "liuguang_internal",
   // ARK API (Volcano Engine direct API for Seedance video generation)
   arkApiKey: process.env.ARK_API_KEY ?? "",
-  arkApiUrl: "https://ark.cn-beijing.volces.com/api/v3",
+  arkApiUrl: process.env.ARK_API_URL ?? "https://ark.cn-beijing.volces.com/api/v3",
+  seedance2Model: process.env.SEEDANCE_2_MODEL ?? "doubao-seedance-2-0-260128",
+  seedance2FallbackModels: process.env.SEEDANCE_2_FALLBACK_MODELS ?? "",
   // Legacy (kept for backward compatibility)
   geminiApiKey: process.env.GEMINI_API_KEY ?? "",
   falApiKey: process.env.FAL_API_KEY ?? "",

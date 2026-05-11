@@ -130,6 +130,40 @@ function normalizeProjectBible(value: unknown): ProjectBible {
   };
 }
 
+function getNestedValue(value: unknown, path: string[]): unknown {
+  let current = value;
+  for (const key of path) {
+    if (!current || typeof current !== "object") return undefined;
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
+}
+
+function extractPromptText(value: unknown, fallback = ""): string {
+  if (typeof value === "string") return value.trim();
+  const paths = [
+    ["finalPrompt"],
+    ["prompt"],
+    ["prompt", "zh"],
+    ["prompt", "cn"],
+    ["prompt", "en"],
+    ["videoPrompt"],
+    ["seedancePrompt"],
+    ["result", "finalPrompt"],
+    ["result", "prompt"],
+    ["result", "prompt", "zh"],
+    ["result", "prompt", "cn"],
+    ["result", "prompt", "en"],
+  ];
+
+  for (const path of paths) {
+    const candidate = getNestedValue(value, path);
+    if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+  }
+
+  return toReadableText(value, fallback).trim();
+}
+
 // ─── System Prompt 模板 ────────────────────────────────────────────────────────
 
 const PROMPT_METHODOLOGY = `核心方法论：
@@ -759,8 +793,9 @@ ${refList || "（无参考图）"}
   });
 
   try {
-    const parsed = parseLlmJson<{ finalPrompt?: string }>(response, "Seedance 2.0 提示词");
-    return (parsed.finalPrompt || response).trim();
+    const parsed = parseLlmJson<unknown>(response, "Seedance 2.0 提示词");
+    const prompt = extractPromptText(parsed, response);
+    return prompt || response.trim();
   } catch {
     return response.trim();
   }

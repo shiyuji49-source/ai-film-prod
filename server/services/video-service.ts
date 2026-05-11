@@ -104,6 +104,43 @@ export interface GenerateVideoResult {
   status: string;
 }
 
+function splitModelList(value?: string | null): string[] {
+  return (value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function unique(values: string[]): string[] {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function getSeedance2ModelCandidates(): string[] {
+  return unique([
+    ...splitModelList(ENV.seedance2Model),
+    ...splitModelList(ENV.seedance2FallbackModels),
+    "doubao-seedance-2-0-260128",
+    "doubao-seedance-2-0-fast-260128",
+    "doubao-seedance-2-0-pro",
+  ]);
+}
+
+function isSeedanceModelAccessError(status: number, text: string): boolean {
+  const lower = text.toLowerCase();
+  return (
+    status === 404 ||
+    lower.includes("invalidendpointormodel") ||
+    lower.includes("does not exist") ||
+    lower.includes("do not have access") ||
+    lower.includes("no permission") ||
+    lower.includes("access denied")
+  );
+}
+
+function summarizeError(text: string): string {
+  return text.replace(/\s+/g, " ").slice(0, 700);
+}
+
 /**
  * 统一视频生成入口
  *
@@ -172,50 +209,75 @@ async function _generateSeedance2(options: GenerateVideoOptions): Promise<{ rawU
 
   const arkBaseUrl = ENV.arkApiUrl || "https://ark.cn-beijing.volces.com/api/v3";
   const arkKey = ENV.arkApiKey;
+  if (!arkKey) throw new Error("Seedance 2.0: 缺少 ARK_API_KEY");
+
+  const models = getSeedance2ModelCandidates();
+  const errors: string[] = [];
 
   let taskId: string | undefined;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      const resp = await fetch(`${arkBaseUrl}/contents/generations/tasks`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${arkKey}`,
-        },
-        body: JSON.stringify({
-          model: "doubao-seedance-2-0-pro",
-          content,
-          ratio: aspectRatio,
-          duration: Math.max(4, Math.min(15, duration ?? 5)),
-          watermark: false,
-        }),
-      });
 
-      if (!resp.ok) {
-        const errText = await resp.text();
-        const is503 = resp.status === 503 || errText.includes("503") || errText.includes("No available channels");
+  for (const model of models) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const resp = await fetch(`${arkBaseUrl}/contents/generations/tasks`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${arkKey}`,
+          },
+          body: JSON.stringify({
+            model,
+            content,
+            ratio: aspectRatio,
+            duration: Math.max(4, Math.min(15, duration ?? 5)),
+            watermark: false,
+          }),
+        });
+
+        if (!resp.ok) {
+          const errText = await resp.text();
+          const detail = `${model}: HTTP ${resp.status} ${summarizeError(errText)}`;
+
+          if (isSeedanceModelAccessError(resp.status, errText)) {
+            errors.push(detail);
+            break;
+          }
+
+          const is503 = resp.status === 503 || errText.includes("503") || errText.includes("No available channels");
+          if (is503 && attempt < 2) {
+            console.warn(`[Seedance2] ${model} 503 on attempt ${attempt + 1}, retrying in 10s...`);
+            await new Promise((r) => setTimeout(r, 10000));
+            continue;
+          }
+
+          throw new Error(`Seedance 2.0 create error: ${detail}`);
+        }
+
+        const data = await resp.json();
+        taskId = data.id ?? data.task_id ?? data.taskId;
+        if (!taskId) throw new Error(`${model}: 任务创建成功但没有返回任务 ID`);
+        console.info(`[Seedance2] started with model ${model}, taskId ${taskId}`);
+        break;
+      } catch (err: any) {
+        const message = err?.message ?? String(err);
+        const is503 = message.includes("503") || message.includes("No available channels");
         if (is503 && attempt < 2) {
-          console.warn(`[Seedance2] 503 on attempt ${attempt + 1}, retrying in 10s...`);
           await new Promise((r) => setTimeout(r, 10000));
           continue;
         }
-        throw new Error(`Seedance 2.0 create error (${resp.status}): ${errText}`);
+        throw err;
       }
-
-      const data = await resp.json();
-      taskId = data.id;
-      break;
-    } catch (err: any) {
-      const is503 = err?.message?.includes("503") || err?.message?.includes("No available channels");
-      if (is503 && attempt < 2) {
-        await new Promise((r) => setTimeout(r, 10000));
-        continue;
-      }
-      throw err;
     }
+    if (taskId) break;
   }
 
-  if (!taskId) throw new Error("Seedance 2.0: failed to start after retries");
+  if (!taskId) {
+    throw new Error(
+      `Seedance 2.0: 当前 ARK_KEY 没有可用的 2.0 模型/接入点。已尝试：${models.join(", ")}。` +
+      `请在火山 Ark 控制台确认已开通的 Seedance 2.0 模型 ID，写入服务器 .env 的 SEEDANCE_2_MODEL。` +
+      (errors.length ? ` 最近错误：${errors.join(" | ")}` : "")
+    );
+  }
 
   const rawUrl = await _pollSeedanceTask(taskId, 600000, 8000);
   return { rawUrl, taskId };

@@ -403,6 +403,7 @@ export type VideoModel =
   | "grok-video-3-15s"
   | "wan2.6-i2v"
   | "sora-2-pro"
+  | "doubao-seedance-2-0-260128"
   | "doubao-seedance-2-0-pro"
   | "kling-3.0"
   | "kling-3.0-omni"
@@ -466,6 +467,7 @@ export const IMAGE_MODELS = [
 
 export const VIDEO_MODELS = [
   { id: "doubao-seedance-1-5-pro-251215", name: "Seedance 1.5 Pro", provider: "Volcano", caps: { firstFrame: true, lastFrame: false, subjectRef: false } },
+  { id: "doubao-seedance-2-0-260128", name: "Seedance 2.0", provider: "Volcano", caps: { firstFrame: false, lastFrame: false, subjectRef: true } },
   { id: "veo-3.1-4k", name: "Veo 3.1 4K", provider: "Google", caps: { firstFrame: true, lastFrame: false, subjectRef: false } },
   { id: "kling-3.0", name: "Kling 3.0", provider: "Kuaishou", caps: { firstFrame: true, lastFrame: true, subjectRef: true } },
   { id: "kling-3.0-omni", name: "Kling 3.0 Omni", provider: "Kuaishou", caps: { firstFrame: true, lastFrame: true, subjectRef: true } },

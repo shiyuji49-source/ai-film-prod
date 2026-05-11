@@ -27,6 +27,8 @@ function envStatus() {
     LQ_API_KEY: Boolean(process.env.LQ_API_KEY),
     LQ_API_URL: process.env.LQ_API_URL || "https://lqapi.top/v1",
     ARK_API_KEY: Boolean(process.env.ARK_API_KEY),
+    ARK_API_URL: process.env.ARK_API_URL || "https://ark.cn-beijing.volces.com/api/v3",
+    SEEDANCE_2_MODEL: process.env.SEEDANCE_2_MODEL || "doubao-seedance-2-0-260128",
     STORAGE: storageReady,
   };
 }
