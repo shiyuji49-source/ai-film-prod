@@ -171,24 +171,13 @@ export async function generateLQImage2(options: {
     "4:3": "1536x1024",
   };
   const preferredSize = sizeByRatio[options.aspectRatio ?? "9:16"] ?? "1024x1024";
-  const buildChatBody = (size: string, content: any, withPrompt = true) => ({
-    model: "openai/gpt-image-2",
-    messages: [{ role: "user", content }],
-    ...(withPrompt ? { prompt: options.prompt } : {}),
-    size,
-    stream: false,
-  });
   const buildImageBody = (size: string, model: string) => ({
     model,
     prompt: options.prompt,
     size,
   });
   const requestBodies: Array<{ path: string; label: string; body: any }> = [
-    { path: "/chat/completions", label: "chat_messages_string", body: buildChatBody(preferredSize, options.prompt) },
-    { path: "/chat/completions", label: "chat_messages_string_square", body: buildChatBody("1024x1024", options.prompt) },
-    { path: "/chat/completions", label: "chat_messages_parts", body: buildChatBody(preferredSize, withEphemeralCache(options.prompt)) },
-    { path: "/chat/completions", label: "chat_messages_only", body: buildChatBody("1024x1024", options.prompt, false) },
-    { path: "/chat/completions", label: "chat_prompt_only", body: { model: "openai/gpt-image-2", prompt: options.prompt, size: "1024x1024", stream: false } },
+    { path: "/images/generations", label: "images_openai_prefixed_preferred", body: buildImageBody(preferredSize, "openai/gpt-image-2") },
     { path: "/images/generations", label: "images_openai_prefixed", body: buildImageBody("1024x1024", "openai/gpt-image-2") },
     { path: "/images/generations", label: "images_gpt_image_2", body: buildImageBody("1024x1024", "gpt-image-2") },
   ];

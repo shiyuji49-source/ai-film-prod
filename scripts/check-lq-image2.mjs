@@ -37,6 +37,24 @@ function hasImagePayload(text) {
 const prompt = "black and white storyboard sketch, simple line drawing, one empty film frame, no text";
 const attempts = [
   {
+    label: "images_openai_prefixed",
+    path: "/images/generations",
+    body: {
+      model: "openai/gpt-image-2",
+      prompt,
+      size: "1024x1024",
+    },
+  },
+  {
+    label: "images_gpt_image_2",
+    path: "/images/generations",
+    body: {
+      model: "gpt-image-2",
+      prompt,
+      size: "1024x1024",
+    },
+  },
+  {
     label: "chat_messages_string",
     path: "/chat/completions",
     body: {
@@ -76,24 +94,6 @@ const attempts = [
       prompt,
       size: "1024x1024",
       stream: false,
-    },
-  },
-  {
-    label: "images_openai_prefixed",
-    path: "/images/generations",
-    body: {
-      model: "openai/gpt-image-2",
-      prompt,
-      size: "1024x1024",
-    },
-  },
-  {
-    label: "images_gpt_image_2",
-    path: "/images/generations",
-    body: {
-      model: "gpt-image-2",
-      prompt,
-      size: "1024x1024",
     },
   },
 ];
